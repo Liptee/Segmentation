@@ -52,7 +52,7 @@ class SelectableRectItem(QGraphicsRectItem):
     HANDLE_BOTTOM_MIDDLE = 6
     HANDLE_BOTTOM_RIGHT = 7
     
-    def __init__(self, x, y, w, h, parent=None):
+    def __init__(self, x, y, w, h, parent=None, scene=None):
         super().__init__(x, y, w, h, parent)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
@@ -72,119 +72,182 @@ class SelectableRectItem(QGraphicsRectItem):
         self.mouse_press_pos = None
         self.mouse_press_rect = None
         self.hover_handle = None
-        
-    def paint(self, painter, option, widget):
-        super().paint(painter, option, widget)
-        
-        # Если прямоугольник выбран, рисуем маркеры изменения размера
-        if self.isSelected():
-            rect = self.rect()
-            handle_size = self.resize_handle_size
-            
-            # Рисуем маркеры в углах и по центрам сторон
-            painter.setPen(QPen(Qt.black, 1, Qt.SolidLine))
-            painter.setBrush(QColor(255, 255, 255))
-            
-            # Верхний левый угол
-            painter.drawRect(QRectF(rect.left() - handle_size/2, rect.top() - handle_size/2, handle_size, handle_size))
-            # Верхний правый угол
-            painter.drawRect(QRectF(rect.right() - handle_size/2, rect.top() - handle_size/2, handle_size, handle_size))
-            # Нижний левый угол
-            painter.drawRect(QRectF(rect.left() - handle_size/2, rect.bottom() - handle_size/2, handle_size, handle_size))
-            # Нижний правый угол
-            painter.drawRect(QRectF(rect.right() - handle_size/2, rect.bottom() - handle_size/2, handle_size, handle_size))
-            
-            # Центр верхней стороны
-            painter.drawRect(QRectF(rect.center().x() - handle_size/2, rect.top() - handle_size/2, handle_size, handle_size))
-            # Центр нижней стороны
-            painter.drawRect(QRectF(rect.center().x() - handle_size/2, rect.bottom() - handle_size/2, handle_size, handle_size))
-            # Центр левой стороны
-            painter.drawRect(QRectF(rect.left() - handle_size/2, rect.center().y() - handle_size/2, handle_size, handle_size))
-            # Центр правой стороны
-            painter.drawRect(QRectF(rect.right() - handle_size/2, rect.center().y() - handle_size/2, handle_size, handle_size))
+        self.scene = scene
     
-    def handle_at_position(self, pos):
-        """Определяет, находится ли позиция над одним из маркеров изменения размера"""
-        rect = self.rect()
-        handle_size = self.resize_handle_size
+    def get_image_rect(self):
+        """Получить прямоугольник изображения"""
+        # Проверяем если self.scene это экземпляр ImageViewerWidget
+        if self.scene and hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
+            return self.scene.pixmap_item.boundingRect()
         
-        # Проверяем каждый маркер
-        handle_rects = [
-            # Верхний левый угол
-            QRectF(rect.left() - handle_size/2, rect.top() - handle_size/2, handle_size, handle_size),
-            # Центр верхней стороны
-            QRectF(rect.center().x() - handle_size/2, rect.top() - handle_size/2, handle_size, handle_size),
-            # Верхний правый угол
-            QRectF(rect.right() - handle_size/2, rect.top() - handle_size/2, handle_size, handle_size),
-            # Центр левой стороны
-            QRectF(rect.left() - handle_size/2, rect.center().y() - handle_size/2, handle_size, handle_size),
-            # Центр правой стороны
-            QRectF(rect.right() - handle_size/2, rect.center().y() - handle_size/2, handle_size, handle_size),
-            # Нижний левый угол
-            QRectF(rect.left() - handle_size/2, rect.bottom() - handle_size/2, handle_size, handle_size),
-            # Центр нижней стороны
-            QRectF(rect.center().x() - handle_size/2, rect.bottom() - handle_size/2, handle_size, handle_size),
-            # Нижний правый угол
-            QRectF(rect.right() - handle_size/2, rect.bottom() - handle_size/2, handle_size, handle_size)
-        ]
+        # Проверяем если self.scene._scene это QGraphicsScene с pixmap_item
+        if self.scene and hasattr(self.scene, 'scene') and self.scene.scene:
+            scene = self.scene.scene
+            if hasattr(scene, 'pixmap_item') and scene.pixmap_item:
+                return scene.pixmap_item.boundingRect()
         
-        for i, handle_rect in enumerate(handle_rects):
-            if handle_rect.contains(pos):
-                return i
+        # Если не удалось получить через scene, пробуем через сцену, к которой прикреплен элемент
+        scene = self.scene()
+        if scene:
+            # Проверяем, есть ли pixmap_item непосредственно в сцене
+            if hasattr(scene, 'pixmap_item') and scene.pixmap_item:
+                return scene.pixmap_item.boundingRect()
+            
+            # Проверяем, есть ли родительский объект с pixmap_item
+            if hasattr(scene, 'parent') and scene.parent():
+                parent = scene.parent()
+                if hasattr(parent, 'pixmap_item') and parent.pixmap_item:
+                    return parent.pixmap_item.boundingRect()
         
+        # Последняя проверка, если self.scene это что-то другое с pixmap_item как атрибутом
+        if hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
+            return self.scene.pixmap_item.boundingRect()
+            
         return None
     
+    def constrain_rect_to_image(self, rect):
+        """Ограничивает прямоугольник границами изображения"""
+        image_rect = self.get_image_rect()
+        if image_rect:
+            # Получаем текущую позицию элемента
+            item_pos = self.pos()
+            
+            # Рассчитываем абсолютное положение углов прямоугольника в сцене
+            abs_left = item_pos.x() + rect.left()
+            abs_right = item_pos.x() + rect.right()
+            abs_top = item_pos.y() + rect.top()
+            abs_bottom = item_pos.y() + rect.bottom()
+            
+            # Ограничиваем абсолютные координаты
+            new_left = max(image_rect.left(), abs_left)
+            new_right = min(image_rect.right(), abs_right)
+            new_top = max(image_rect.top(), abs_top)
+            new_bottom = min(image_rect.bottom(), abs_bottom)
+            
+            # Преобразуем обратно в локальные координаты
+            new_rect = QRectF(
+                new_left - item_pos.x(),
+                new_top - item_pos.y(),
+                new_right - new_left,
+                new_bottom - new_top
+            )
+            return new_rect
+        return rect
+    
+    def itemChange(self, change, value):
+        """Обработка изменений элемента"""
+        # Когда меняется позиция прямоугольника, проверяем, не выходит ли он за границы изображения
+        if change == QGraphicsItem.ItemPositionChange and self.scene:
+            new_pos = value
+            image_rect = self.get_image_rect()
+            
+            if image_rect:
+                # Получаем границы прямоугольника
+                rect = self.rect()
+                
+                # Проверяем, не выходит ли прямоугольник за границы изображения
+                if new_pos.x() + rect.left() < image_rect.left():
+                    new_pos.setX(image_rect.left() - rect.left())
+                elif new_pos.x() + rect.right() > image_rect.right():
+                    new_pos.setX(image_rect.right() - rect.right())
+                
+                if new_pos.y() + rect.top() < image_rect.top():
+                    new_pos.setY(image_rect.top() - rect.top())
+                elif new_pos.y() + rect.bottom() > image_rect.bottom():
+                    new_pos.setY(image_rect.bottom() - rect.bottom())
+                
+                return new_pos
+        
+        return super().itemChange(change, value)
+    
+    def handle_at_position(self, pos):
+        """Определяет, находится ли указанная позиция над одним из маркеров изменения размера"""
+        rect = self.rect()
+        handle_size = self.resize_handle_size
+        # Верхняя левая точка
+        handle_rect = QRectF(rect.left() - handle_size/2, rect.top() - handle_size/2, handle_size, handle_size)
+        if handle_rect.contains(pos):
+            return self.HANDLE_TOP_LEFT
+        # Верхняя средняя точка
+        handle_rect = QRectF(rect.left() + rect.width()/2 - handle_size/2, rect.top() - handle_size/2, handle_size, handle_size)
+        if handle_rect.contains(pos):
+            return self.HANDLE_TOP_MIDDLE
+        # Верхняя правая точка
+        handle_rect = QRectF(rect.right() - handle_size/2, rect.top() - handle_size/2, handle_size, handle_size)
+        if handle_rect.contains(pos):
+            return self.HANDLE_TOP_RIGHT
+        # Средняя левая точка
+        handle_rect = QRectF(rect.left() - handle_size/2, rect.top() + rect.height()/2 - handle_size/2, handle_size, handle_size)
+        if handle_rect.contains(pos):
+            return self.HANDLE_MIDDLE_LEFT
+        # Средняя правая точка
+        handle_rect = QRectF(rect.right() - handle_size/2, rect.top() + rect.height()/2 - handle_size/2, handle_size, handle_size)
+        if handle_rect.contains(pos):
+            return self.HANDLE_MIDDLE_RIGHT
+        # Нижняя левая точка
+        handle_rect = QRectF(rect.left() - handle_size/2, rect.bottom() - handle_size/2, handle_size, handle_size)
+        if handle_rect.contains(pos):
+            return self.HANDLE_BOTTOM_LEFT
+        # Нижняя средняя точка
+        handle_rect = QRectF(rect.left() + rect.width()/2 - handle_size/2, rect.bottom() - handle_size/2, handle_size, handle_size)
+        if handle_rect.contains(pos):
+            return self.HANDLE_BOTTOM_MIDDLE
+        # Нижняя правая точка
+        handle_rect = QRectF(rect.right() - handle_size/2, rect.bottom() - handle_size/2, handle_size, handle_size)
+        if handle_rect.contains(pos):
+            return self.HANDLE_BOTTOM_RIGHT
+        # Если не над маркером, возвращаем None
+        return None
+        
     def mousePressEvent(self, event):
-        """Обработка нажатия кнопки мыши на прямоугольнике"""
+        """Обработка нажатия мыши на прямоугольнике"""
         if event.button() == Qt.LeftButton:
-            pos = event.pos()
-            # Проверяем, нажат ли один из маркеров изменения размера
-            handle = self.handle_at_position(pos)
+            handle = self.handle_at_position(event.pos())
             if handle is not None and self.isSelected():
                 self.current_resize_handle = handle
-                self.mouse_press_pos = pos
+                self.mouse_press_pos = event.pos()
                 self.mouse_press_rect = self.rect()
                 event.accept()
                 return
-        
+                
         super().mousePressEvent(event)
-    
+        
     def mouseMoveEvent(self, event):
-        """Обработка движения мыши при нажатой кнопке"""
+        """Обработка перемещения мыши с нажатой кнопкой"""
         if self.current_resize_handle is not None:
-            # Изменяем размер прямоугольника в зависимости от выбранного маркера
-            pos = event.pos()
-            rect = QRectF(self.mouse_press_rect)
+            # Изменяем размер прямоугольника
+            rect = self.rect()
+            delta = event.pos() - self.mouse_press_pos
             
-            dx = pos.x() - self.mouse_press_pos.x()
-            dy = pos.y() - self.mouse_press_pos.y()
+            # Создаем копию прямоугольника для изменения
+            new_rect = QRectF(rect)
             
-            # Обрабатываем изменение размера в зависимости от маркера
+            # Обновляем прямоугольник в зависимости от того, какой маркер выбран
             if self.current_resize_handle == self.HANDLE_TOP_LEFT:
-                rect.setTopLeft(rect.topLeft() + QPointF(dx, dy))
+                new_rect.setTopLeft(self.mouse_press_rect.topLeft() + delta)
             elif self.current_resize_handle == self.HANDLE_TOP_MIDDLE:
-                rect.setTop(rect.top() + dy)
+                new_rect.setTop(self.mouse_press_rect.top() + delta.y())
             elif self.current_resize_handle == self.HANDLE_TOP_RIGHT:
-                rect.setTopRight(rect.topRight() + QPointF(dx, dy))
+                new_rect.setTopRight(self.mouse_press_rect.topRight() + delta)
             elif self.current_resize_handle == self.HANDLE_MIDDLE_LEFT:
-                rect.setLeft(rect.left() + dx)
+                new_rect.setLeft(self.mouse_press_rect.left() + delta.x())
             elif self.current_resize_handle == self.HANDLE_MIDDLE_RIGHT:
-                rect.setRight(rect.right() + dx)
+                new_rect.setRight(self.mouse_press_rect.right() + delta.x())
             elif self.current_resize_handle == self.HANDLE_BOTTOM_LEFT:
-                rect.setBottomLeft(rect.bottomLeft() + QPointF(dx, dy))
+                new_rect.setBottomLeft(self.mouse_press_rect.bottomLeft() + delta)
             elif self.current_resize_handle == self.HANDLE_BOTTOM_MIDDLE:
-                rect.setBottom(rect.bottom() + dy)
+                new_rect.setBottom(self.mouse_press_rect.bottom() + delta.y())
             elif self.current_resize_handle == self.HANDLE_BOTTOM_RIGHT:
-                rect.setBottomRight(rect.bottomRight() + QPointF(dx, dy))
+                new_rect.setBottomRight(self.mouse_press_rect.bottomRight() + delta)
+                
+            # Ограничиваем прямоугольник границами изображения
+            constrained_rect = self.constrain_rect_to_image(new_rect)
             
-            # Проверяем, что прямоугольник не стал "вывернутым наизнанку"
-            if rect.width() >= 5 and rect.height() >= 5:
-                self.setRect(rect)
-                self.update()
-            
+            # Устанавливаем новый прямоугольник
+            self.setRect(constrained_rect)
             event.accept()
             return
-        
+            
         super().mouseMoveEvent(event)
     
     def mouseReleaseEvent(self, event):
@@ -229,16 +292,49 @@ class SelectableRectItem(QGraphicsRectItem):
         self.setCursor(Qt.ArrowCursor)
         super().hoverLeaveEvent(event)
 
+    def paint(self, painter, option, widget):
+        """Отрисовка прямоугольника и маркеров изменения размера"""
+        # Отрисовка основного прямоугольника
+        super().paint(painter, option, widget)
+        
+        # Если прямоугольник выбран, рисуем маркеры изменения размера
+        if self.isSelected():
+            rect = self.rect()
+            handle_size = self.resize_handle_size
+            
+            # Рисуем маркеры в углах и по центрам сторон
+            painter.setPen(QPen(Qt.black, 1, Qt.SolidLine))
+            painter.setBrush(QColor(255, 255, 255))
+            
+            # Верхний левый угол
+            painter.drawRect(QRectF(rect.left() - handle_size/2, rect.top() - handle_size/2, handle_size, handle_size))
+            # Верхний правый угол
+            painter.drawRect(QRectF(rect.right() - handle_size/2, rect.top() - handle_size/2, handle_size, handle_size))
+            # Нижний левый угол
+            painter.drawRect(QRectF(rect.left() - handle_size/2, rect.bottom() - handle_size/2, handle_size, handle_size))
+            # Нижний правый угол
+            painter.drawRect(QRectF(rect.right() - handle_size/2, rect.bottom() - handle_size/2, handle_size, handle_size))
+            
+            # Центр верхней стороны
+            painter.drawRect(QRectF(rect.center().x() - handle_size/2, rect.top() - handle_size/2, handle_size, handle_size))
+            # Центр нижней стороны
+            painter.drawRect(QRectF(rect.center().x() - handle_size/2, rect.bottom() - handle_size/2, handle_size, handle_size))
+            # Центр левой стороны
+            painter.drawRect(QRectF(rect.left() - handle_size/2, rect.center().y() - handle_size/2, handle_size, handle_size))
+            # Центр правой стороны
+            painter.drawRect(QRectF(rect.right() - handle_size/2, rect.center().y() - handle_size/2, handle_size, handle_size))
+
 
 class SelectablePolygonItem(QGraphicsPolygonItem):
     """Класс для создания выделяемых и редактируемых полигонов"""
     
-    def __init__(self, points=None, parent=None):
+    def __init__(self, points=None, parent=None, scene=None):
         """Инициализация полигона
         
         Args:
             points: Список точек полигона (QPointF)
             parent: Родительский элемент
+            scene: Сцена, к которой привязан полигон (для получения границ изображения)
         """
         # Создаем полигон из списка точек
         polygon = QPolygonF(points if points else [])
@@ -258,9 +354,60 @@ class SelectablePolygonItem(QGraphicsPolygonItem):
         self.handle_size = 8
         self.current_point_index = None
         self.mouse_press_pos = None
+        self.scene = scene
         
         # Установка обработки наведения мыши
         self.setAcceptHoverEvents(True)
+    
+    def get_image_rect(self):
+        """Получить прямоугольник изображения"""
+        # Проверяем если self.scene это экземпляр ImageViewerWidget
+        if self.scene and hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
+            return self.scene.pixmap_item.boundingRect()
+        
+        # Проверяем если self.scene._scene это QGraphicsScene с pixmap_item
+        if self.scene and hasattr(self.scene, 'scene') and self.scene.scene:
+            scene = self.scene.scene
+            if hasattr(scene, 'pixmap_item') and scene.pixmap_item:
+                return scene.pixmap_item.boundingRect()
+        
+        # Если не удалось получить через scene, пробуем через сцену, к которой прикреплен элемент
+        scene = self.scene()
+        if scene:
+            # Проверяем, есть ли pixmap_item непосредственно в сцене
+            if hasattr(scene, 'pixmap_item') and scene.pixmap_item:
+                return scene.pixmap_item.boundingRect()
+            
+            # Проверяем, есть ли родительский объект с pixmap_item
+            if hasattr(scene, 'parent') and scene.parent():
+                parent = scene.parent()
+                if hasattr(parent, 'pixmap_item') and parent.pixmap_item:
+                    return parent.pixmap_item.boundingRect()
+        
+        # Последняя проверка, если self.scene это что-то другое с pixmap_item как атрибутом
+        if hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
+            return self.scene.pixmap_item.boundingRect()
+            
+        return None
+    
+    def constrain_point_to_image(self, point):
+        """Ограничивает точку границами изображения"""
+        image_rect = self.get_image_rect()
+        if image_rect:
+            # Получаем текущую позицию элемента
+            item_pos = self.pos()
+            
+            # Рассчитываем абсолютное положение точки в сцене
+            abs_x = item_pos.x() + point.x()
+            abs_y = item_pos.y() + point.y()
+            
+            # Ограничиваем абсолютные координаты
+            new_x = max(image_rect.left(), min(abs_x, image_rect.right()))
+            new_y = max(image_rect.top(), min(abs_y, image_rect.bottom()))
+            
+            # Преобразуем обратно в локальные координаты
+            return QPointF(new_x - item_pos.x(), new_y - item_pos.y())
+        return point
     
     def itemChange(self, change, value):
         """Обработка изменений элемента"""
@@ -268,6 +415,29 @@ class SelectablePolygonItem(QGraphicsPolygonItem):
         # чтобы маркеры точек были отрисованы в правильных позициях
         if change == QGraphicsItem.ItemPositionHasChanged:
             self.update()
+        
+        # Когда меняется позиция полигона, проверяем, не выходит ли он за границы изображения
+        elif change == QGraphicsItem.ItemPositionChange and self.scene:
+            new_pos = value
+            image_rect = self.get_image_rect()
+            
+            if image_rect:
+                # Получаем границы полигона
+                polygon_rect = self.boundingRect()
+                
+                # Проверяем, не выходит ли полигон за границы изображения
+                if new_pos.x() + polygon_rect.left() < image_rect.left():
+                    new_pos.setX(image_rect.left() - polygon_rect.left())
+                elif new_pos.x() + polygon_rect.right() > image_rect.right():
+                    new_pos.setX(image_rect.right() - polygon_rect.right())
+                
+                if new_pos.y() + polygon_rect.top() < image_rect.top():
+                    new_pos.setY(image_rect.top() - polygon_rect.top())
+                elif new_pos.y() + polygon_rect.bottom() > image_rect.bottom():
+                    new_pos.setY(image_rect.bottom() - polygon_rect.bottom())
+                
+                return new_pos
+        
         return super().itemChange(change, value)
     
     def paint(self, painter, option, widget):
@@ -335,9 +505,12 @@ class SelectablePolygonItem(QGraphicsPolygonItem):
             # Перемещаем выбранную точку
             new_pos = event.pos()
             
+            # Ограничиваем позицию границами изображения
+            constrained_pos = self.constrain_point_to_image(new_pos)
+            
             # Получаем текущий полигон и обновляем точку
             polygon = self.polygon()
-            polygon.replace(self.current_point_index, new_pos)
+            polygon.replace(self.current_point_index, constrained_pos)
             
             # Обновляем полигон
             self.setPolygon(polygon)
@@ -354,7 +527,7 @@ class SelectablePolygonItem(QGraphicsPolygonItem):
             self.mouse_press_pos = None
         
         super().mouseReleaseEvent(event)
-    
+        
     def hoverMoveEvent(self, event):
         """Обработка перемещения мыши над полигоном"""
         # Изменяем курсор, если мышь находится над точкой полигона
@@ -813,10 +986,10 @@ class ImageViewerWidget(QWidget):
                 self.scene.removeItem(self.current_rect)
                 
                 # Создаем постоянный прямоугольник
-                rect_item = SelectableRectItem(rect.x(), rect.y(), rect.width(), rect.height())
+                rect_item = SelectableRectItem(rect.x(), rect.y(), rect.width(), rect.height(), None, self)
                 # В режиме выделения прямоугольники не должны быть интерактивными
-                rect_item.setFlag(QGraphicsRectItem.ItemIsSelectable, False)
-                rect_item.setFlag(QGraphicsRectItem.ItemIsMovable, False)
+                rect_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+                rect_item.setFlag(QGraphicsItem.ItemIsMovable, False)
                 self.scene.addItem(rect_item)
                 self.annotations.append(rect_item)
             
@@ -842,7 +1015,12 @@ class ImageViewerWidget(QWidget):
             
         # Создаем постоянный полигон
         # Используем copy() для создания копии списка точек
-        polygon_item = SelectablePolygonItem(self.polygon_points.copy())
+        # Передаем непосредственно сцену для доступа к pixmap_item
+        polygon_item = SelectablePolygonItem(self.polygon_points.copy(), None, self)
+        
+        # Установим еще одну ссылку на scene как объект типа QGraphicsScene
+        polygon_item.scene_obj = self.scene
+        
         # В режиме выделения полигоны не должны быть интерактивными
         polygon_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
         polygon_item.setFlag(QGraphicsItem.ItemIsMovable, False)
