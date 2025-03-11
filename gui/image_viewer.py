@@ -2,11 +2,11 @@ import cv2
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSlider, QLabel,
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPinchGesture,
-    QToolBar, QAction, QSizePolicy, QGraphicsRectItem
+    QToolBar, QAction, QSizePolicy, QGraphicsRectItem, QGraphicsPolygonItem, QGraphicsItem
 )
 from PyQt5.QtGui import (
     QPixmap, QImage, QWheelEvent, QPainter, QCursor, 
-    QIcon, QPen, QKeyEvent, QColor
+    QIcon, QPen, QKeyEvent, QColor, QPolygonF
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QPointF, QRectF, QSize, QSizeF
 import numpy as np
@@ -54,9 +54,9 @@ class SelectableRectItem(QGraphicsRectItem):
     
     def __init__(self, x, y, w, h, parent=None):
         super().__init__(x, y, w, h, parent)
-        self.setFlag(QGraphicsRectItem.ItemIsSelectable, True)
-        self.setFlag(QGraphicsRectItem.ItemIsMovable, True)
-        self.setFlag(QGraphicsRectItem.ItemSendsGeometryChanges, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
         # Добавляем флаг для обработки событий мыши
         self.setAcceptHoverEvents(True)
         
@@ -230,6 +230,147 @@ class SelectableRectItem(QGraphicsRectItem):
         super().hoverLeaveEvent(event)
 
 
+class SelectablePolygonItem(QGraphicsPolygonItem):
+    """Класс для создания выделяемых и редактируемых полигонов"""
+    
+    def __init__(self, points=None, parent=None):
+        """Инициализация полигона
+        
+        Args:
+            points: Список точек полигона (QPointF)
+            parent: Родительский элемент
+        """
+        # Создаем полигон из списка точек
+        polygon = QPolygonF(points if points else [])
+        super().__init__(polygon, parent)
+        
+        # Установка внешнего вида
+        self.setPen(QPen(QColor(0, 255, 0), 2))
+        self.setBrush(QColor(0, 255, 0, 50))
+        
+        # Установка флагов для интерактивности
+        self.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
+        
+        # Переменные для отслеживания состояния
+        # Сохраняем копию точек, чтобы не потерять оригинальные данные
+        self.points = points.copy() if points else []
+        self.handle_size = 8
+        self.current_point_index = None
+        self.mouse_press_pos = None
+        
+        # Установка обработки наведения мыши
+        self.setAcceptHoverEvents(True)
+    
+    def itemChange(self, change, value):
+        """Обработка изменений элемента"""
+        # Когда полигон перемещается, нам нужно обновить отображение,
+        # чтобы маркеры точек были отрисованы в правильных позициях
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            self.update()
+        return super().itemChange(change, value)
+    
+    def paint(self, painter, option, widget):
+        """Отрисовка полигона и маркеров точек"""
+        # Отрисовка основного полигона
+        super().paint(painter, option, widget)
+        
+        # Отрисовка маркеров изменения размера, если элемент выбран
+        if self.isSelected():
+            painter.setPen(QPen(QColor(0, 0, 255), 1))
+            painter.setBrush(QColor(0, 0, 255, 200))
+            
+            # Отрисовка маркера для каждой точки полигона
+            # Используем координаты из полигона, а не из self.points
+            polygon = self.polygon()
+            for i in range(polygon.count()):
+                point = polygon.at(i)
+                handle_rect = QRectF(
+                    point.x() - self.handle_size/2,
+                    point.y() - self.handle_size/2,
+                    self.handle_size,
+                    self.handle_size
+                )
+                painter.drawRect(handle_rect)
+    
+    def point_at_position(self, pos):
+        """Определяет, находится ли указанная позиция над одной из точек полигона
+        
+        Args:
+            pos: Позиция проверки (QPointF)
+            
+        Returns:
+            int: Индекс точки или None, если точка не найдена
+        """
+        polygon = self.polygon()
+        for i in range(polygon.count()):
+            point = polygon.at(i)
+            handle_rect = QRectF(
+                point.x() - self.handle_size/2,
+                point.y() - self.handle_size/2,
+                self.handle_size,
+                self.handle_size
+            )
+            if handle_rect.contains(pos):
+                return i
+        return None
+    
+    def mousePressEvent(self, event):
+        """Обработка нажатия мыши на полигоне"""
+        if event.button() == Qt.LeftButton:
+            pos = event.pos()
+            # Проверяем, нажата ли одна из точек полигона
+            point_index = self.point_at_position(pos)
+            if point_index is not None and self.isSelected():
+                self.current_point_index = point_index
+                self.mouse_press_pos = pos
+                event.accept()
+                return
+        
+        super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Обработка перемещения мыши с нажатой кнопкой"""
+        if self.current_point_index is not None:
+            # Перемещаем выбранную точку
+            new_pos = event.pos()
+            
+            # Получаем текущий полигон и обновляем точку
+            polygon = self.polygon()
+            polygon.replace(self.current_point_index, new_pos)
+            
+            # Обновляем полигон
+            self.setPolygon(polygon)
+            event.accept()
+            return
+        
+        # Для перемещения всего полигона используем стандартную обработку
+        super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """Обработка отпускания кнопки мыши"""
+        if self.current_point_index is not None:
+            self.current_point_index = None
+            self.mouse_press_pos = None
+        
+        super().mouseReleaseEvent(event)
+    
+    def hoverMoveEvent(self, event):
+        """Обработка перемещения мыши над полигоном"""
+        # Изменяем курсор, если мышь находится над точкой полигона
+        if self.isSelected() and self.point_at_position(event.pos()) is not None:
+            self.setCursor(Qt.PointingHandCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
+        
+        super().hoverMoveEvent(event)
+    
+    def hoverLeaveEvent(self, event):
+        """Обработка выхода мыши за пределы полигона"""
+        self.setCursor(Qt.ArrowCursor)
+        super().hoverLeaveEvent(event)
+
+
 class CrosshairGraphicsScene(QGraphicsScene):
     """Сцена с отображением перекрестия при выборе инструмента выделения"""
     
@@ -279,6 +420,7 @@ class ImageViewerWidget(QWidget):
     MODE_VIEW = 0
     MODE_RECT_SELECT = 1
     MODE_EDIT = 2
+    MODE_POLYGON_SELECT = 3
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -293,6 +435,11 @@ class ImageViewerWidget(QWidget):
         self.start_point = None
         self.current_rect = None
         self.selected_item = None
+        
+        # Переменные для режима выделения полигона
+        self.current_polygon = None
+        self.polygon_points = []
+        self.temp_line = None
         
         self._init_ui()
         self._init_adjustments()
@@ -310,12 +457,17 @@ class ImageViewerWidget(QWidget):
         self.action_rect_select.setCheckable(True)
         self.action_rect_select.triggered.connect(lambda: self.set_tool_mode(self.MODE_RECT_SELECT))
         
+        self.action_polygon_select = QAction("Полигоны", self)
+        self.action_polygon_select.setCheckable(True)
+        self.action_polygon_select.triggered.connect(lambda: self.set_tool_mode(self.MODE_POLYGON_SELECT))
+        
         self.action_edit = QAction("Править", self)
         self.action_edit.setCheckable(True)
         self.action_edit.triggered.connect(lambda: self.set_tool_mode(self.MODE_EDIT))
         
         # Добавляем действия на панель инструментов
         self.toolbar.addAction(self.action_rect_select)
+        self.toolbar.addAction(self.action_polygon_select)
         self.toolbar.addAction(self.action_edit)
         
         # Устанавливаем политику размера для панели инструментов
@@ -446,6 +598,7 @@ class ImageViewerWidget(QWidget):
         
         # Сбрасываем состояние всех кнопок
         self.action_rect_select.setChecked(False)
+        self.action_polygon_select.setChecked(False)
         self.action_edit.setChecked(False)
         
         # Устанавливаем соответствующий курсор и режим перетаскивания
@@ -453,39 +606,62 @@ class ImageViewerWidget(QWidget):
             self.view.setDragMode(QGraphicsView.ScrollHandDrag)
             self.view.viewport().setCursor(Qt.OpenHandCursor)
             self.scene.setShowCrosshair(False)
-            # Отключаем интерактивность для всех прямоугольников
+            # Отключаем интерактивность для всех фигур
             for item in self.annotations:
-                if isinstance(item, SelectableRectItem):
-                    item.setFlag(QGraphicsRectItem.ItemIsSelectable, False)
-                    item.setFlag(QGraphicsRectItem.ItemIsMovable, False)
+                if isinstance(item, (SelectableRectItem, SelectablePolygonItem)):
+                    item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+                    item.setFlag(QGraphicsItem.ItemIsMovable, False)
         elif mode == self.MODE_RECT_SELECT:
             self.action_rect_select.setChecked(True)
             self.view.setDragMode(QGraphicsView.NoDrag)
             # Устанавливаем курсор-перекрестие
             self.view.viewport().setCursor(Qt.CrossCursor)
             self.scene.setShowCrosshair(True)
-            # Отключаем интерактивность для всех прямоугольников
+            # Отключаем интерактивность для всех фигур
             for item in self.annotations:
-                if isinstance(item, SelectableRectItem):
-                    item.setFlag(QGraphicsRectItem.ItemIsSelectable, False)
-                    item.setFlag(QGraphicsRectItem.ItemIsMovable, False)
+                if isinstance(item, (SelectableRectItem, SelectablePolygonItem)):
+                    item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+                    item.setFlag(QGraphicsItem.ItemIsMovable, False)
+        elif mode == self.MODE_POLYGON_SELECT:
+            self.action_polygon_select.setChecked(True)
+            self.view.setDragMode(QGraphicsView.NoDrag)
+            # Устанавливаем курсор-перекрестие
+            self.view.viewport().setCursor(Qt.CrossCursor)
+            self.scene.setShowCrosshair(True)
+            # Отключаем интерактивность для всех фигур
+            for item in self.annotations:
+                if isinstance(item, (SelectableRectItem, SelectablePolygonItem)):
+                    item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+                    item.setFlag(QGraphicsItem.ItemIsMovable, False)
+            # Сбрасываем точки полигона
+            self.polygon_points = []
+            if self.temp_line:
+                self.scene.removeItem(self.temp_line)
+                self.temp_line = None
         elif mode == self.MODE_EDIT:
             self.action_edit.setChecked(True)
             self.view.setDragMode(QGraphicsView.NoDrag)
             self.view.viewport().setCursor(Qt.ArrowCursor)
             self.scene.setShowCrosshair(False)
-            # Включаем интерактивность для всех прямоугольников
+            # Включаем интерактивность для всех фигур
             for item in self.annotations:
-                if isinstance(item, SelectableRectItem):
-                    item.setFlag(QGraphicsRectItem.ItemIsSelectable, True)
-                    item.setFlag(QGraphicsRectItem.ItemIsMovable, True)
+                if isinstance(item, (SelectableRectItem, SelectablePolygonItem)):
+                    item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+                    item.setFlag(QGraphicsItem.ItemIsMovable, True)
             
         # Сбрасываем текущее выделение
         if self.current_rect:
             self.scene.removeItem(self.current_rect)
             self.current_rect = None
+        if self.current_polygon:
+            self.scene.removeItem(self.current_polygon)
+            self.current_polygon = None
+        if self.temp_line:
+            self.scene.removeItem(self.temp_line)
+            self.temp_line = None
         self.start_point = None
-        
+        self.polygon_points = []
+
     def eventFilter(self, obj, event):
         """Фильтр событий для обработки событий мыши в viewport"""
         if obj == self.view.viewport():
@@ -519,38 +695,67 @@ class ImageViewerWidget(QWidget):
         
     def handle_mouse_press(self, event):
         """Обработка нажатия кнопки мыши"""
-        # Обрабатываем только в режиме выделения прямоугольника
-        if self.current_mode == self.MODE_RECT_SELECT:
-            # Получаем координаты в сцене
-            scene_pos = self.view.mapToScene(event.pos())
-            
-            # Проверяем, что точка находится в пределах изображения
-            if self.pixmap_item and self.pixmap_item.contains(scene_pos):
-                self.start_point = scene_pos
-                
-                # Создаем новый прямоугольник
-                self.current_rect = QGraphicsRectItem(QRectF(scene_pos, QSizeF(0, 0)))
-                self.current_rect.setPen(QPen(QColor(255, 0, 0), 2, Qt.DashLine))
-                self.current_rect.setBrush(QColor(255, 0, 0, 50))
-                self.scene.addItem(self.current_rect)
-                
-                return True
+        # Получаем координаты в сцене
+        scene_pos = self.view.mapToScene(event.pos())
         
+        # Проверяем, что точка находится в пределах изображения
+        if not (self.pixmap_item and self.pixmap_item.contains(scene_pos)):
+            return False
+            
+        # Обрабатываем в режиме выделения прямоугольника
+        if self.current_mode == self.MODE_RECT_SELECT:
+            self.start_point = scene_pos
+            
+            # Создаем новый прямоугольник
+            self.current_rect = QGraphicsRectItem(QRectF(scene_pos, QSizeF(0, 0)))
+            self.current_rect.setPen(QPen(QColor(255, 0, 0), 2, Qt.DashLine))
+            self.current_rect.setBrush(QColor(255, 0, 0, 50))
+            self.scene.addItem(self.current_rect)
+            
+            return True
+            
+        # Обрабатываем в режиме выделения полигона
+        elif self.current_mode == self.MODE_POLYGON_SELECT:
+            # Проверяем, близко ли текущая точка к первой точке (для замыкания полигона)
+            if len(self.polygon_points) > 2:
+                first_point = self.polygon_points[0]
+                dist = ((scene_pos.x() - first_point.x()) ** 2 + (scene_pos.y() - first_point.y()) ** 2) ** 0.5
+                
+                # Если расстояние меньше порога, замыкаем полигон
+                if dist < 10:  # 10 пикселей - порог для замыкания
+                    self.complete_polygon()
+                    return True
+            
+            # Добавляем новую точку
+            self.polygon_points.append(scene_pos)
+            
+            # Если это первая точка, создаем временный полигон
+            if len(self.polygon_points) == 1:
+                self.current_polygon = QGraphicsPolygonItem(QPolygonF([scene_pos]))
+                self.current_polygon.setPen(QPen(QColor(0, 255, 0), 2, Qt.DashLine))
+                self.current_polygon.setBrush(QColor(0, 255, 0, 50))
+                self.scene.addItem(self.current_polygon)
+            else:
+                # Обновляем полигон
+                self.current_polygon.setPolygon(QPolygonF(self.polygon_points))
+            
+            return True
+            
         return False
         
     def handle_mouse_move(self, event):
         """Обработка движения мыши"""
-        # Обрабатываем только в режиме выделения прямоугольника
+        # Получаем текущие координаты в сцене
+        current_pos = self.view.mapToScene(event.pos())
+        
+        # Ограничиваем координаты границами изображения
+        if self.pixmap_item:
+            pixmap_rect = self.pixmap_item.boundingRect()
+            current_pos.setX(max(pixmap_rect.left(), min(current_pos.x(), pixmap_rect.right())))
+            current_pos.setY(max(pixmap_rect.top(), min(current_pos.y(), pixmap_rect.bottom())))
+        
+        # Обрабатываем в режиме выделения прямоугольника
         if self.current_mode == self.MODE_RECT_SELECT and self.start_point and self.current_rect:
-            # Получаем текущие координаты в сцене
-            current_pos = self.view.mapToScene(event.pos())
-            
-            # Ограничиваем координаты границами изображения
-            if self.pixmap_item:
-                pixmap_rect = self.pixmap_item.boundingRect()
-                current_pos.setX(max(pixmap_rect.left(), min(current_pos.x(), pixmap_rect.right())))
-                current_pos.setY(max(pixmap_rect.top(), min(current_pos.y(), pixmap_rect.bottom())))
-            
             # Обновляем прямоугольник
             rect = QRectF(
                 min(self.start_point.x(), current_pos.x()),
@@ -562,10 +767,26 @@ class ImageViewerWidget(QWidget):
             
             return True
             
+        # Обрабатываем в режиме выделения полигона
+        elif self.current_mode == self.MODE_POLYGON_SELECT and len(self.polygon_points) > 0:
+            # Обновляем временную линию от последней точки до текущей позиции мыши
+            if self.temp_line:
+                self.scene.removeItem(self.temp_line)
+            
+            last_point = self.polygon_points[-1]
+            self.temp_line = self.scene.addLine(
+                last_point.x(), last_point.y(), 
+                current_pos.x(), current_pos.y(),
+                QPen(QColor(0, 255, 0), 2, Qt.DashLine)
+            )
+            
+            return True
+            
         return False
         
     def handle_mouse_release(self, event):
         """Обработка отпускания кнопки мыши"""
+        # Обрабатываем в режиме выделения прямоугольника
         if self.current_mode == self.MODE_RECT_SELECT and self.start_point and self.current_rect:
             # Получаем конечные координаты в сцене
             end_point = self.view.mapToScene(event.pos())
@@ -605,17 +826,49 @@ class ImageViewerWidget(QWidget):
             return True
             
         return False
+    
+    def complete_polygon(self):
+        """Завершает создание полигона"""
+        if len(self.polygon_points) < 3:
+            # Полигон должен иметь хотя бы 3 точки
+            return
+            
+        # Удаляем временный полигон и линию
+        if self.current_polygon:
+            self.scene.removeItem(self.current_polygon)
+        if self.temp_line:
+            self.scene.removeItem(self.temp_line)
+            self.temp_line = None
+            
+        # Создаем постоянный полигон
+        # Используем copy() для создания копии списка точек
+        polygon_item = SelectablePolygonItem(self.polygon_points.copy())
+        # В режиме выделения полигоны не должны быть интерактивными
+        polygon_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        polygon_item.setFlag(QGraphicsItem.ItemIsMovable, False)
+        self.scene.addItem(polygon_item)
+        self.annotations.append(polygon_item)
         
+        # Сбрасываем переменные
+        self.current_polygon = None
+        self.polygon_points = []
+
     def keyPressEvent(self, event: QKeyEvent):
         """Обработка нажатий клавиш"""
-        # Удаление выбранных прямоугольников при нажатии Delete или Backspace
+        # Удаление выбранных фигур при нажатии Delete или Backspace
         if self.current_mode == self.MODE_EDIT and (event.key() == Qt.Key_Delete or event.key() == Qt.Key_Backspace):
             for item in self.scene.selectedItems():
-                if isinstance(item, SelectableRectItem):
+                if isinstance(item, (SelectableRectItem, SelectablePolygonItem)):
                     self.scene.removeItem(item)
                     if item in self.annotations:
                         self.annotations.remove(item)
             return
+        
+        # Замыкание полигона при нажатии клавиши F
+        if self.current_mode == self.MODE_POLYGON_SELECT and event.key() == Qt.Key_F:
+            if len(self.polygon_points) >= 3:  # Полигон должен иметь хотя бы 3 точки
+                self.complete_polygon()
+                return
             
         super().keyPressEvent(event)
 
