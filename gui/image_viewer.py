@@ -12,6 +12,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QPointF, QRectF, QSize, QSizeF
 import numpy as np
 
 from gui.utils import convert_qimage_to_np, convert_np_to_qimage
+from gui.object_labeler import ObjectLabelerWidget
 
 
 class PinchableGraphicsView(QGraphicsView):
@@ -73,6 +74,54 @@ class SelectableRectItem(QGraphicsRectItem):
         self.mouse_press_rect = None
         self.hover_handle = None
         self.scene = scene
+        
+        # Свойства для класса сегментации
+        self.class_id = None
+        self.class_name = None
+        self.class_color = None
+    
+    def set_class(self, class_data):
+        """Устанавливает класс сегментации для объекта"""
+        if class_data is None:
+            self.class_id = None
+            self.class_name = None
+            self.class_color = QColor(255, 0, 0)  # Красный по умолчанию
+            print("Устанавливаю None класс для прямоугольника")
+        else:
+            self.class_id = class_data.get('id')
+            self.class_name = class_data.get('name')
+            
+            # Получаем цвет из строки вида "#RRGGBB"
+            color_str = class_data.get('color', '#FF0000')
+            print(f"Устанавливаю класс для прямоугольника: {self.class_name}, ID={self.class_id}, цвет={color_str}")
+            self.class_color = QColor(color_str)
+            
+            # Проверка правильности преобразования цвета
+            if not self.class_color.isValid():
+                print(f"Ошибка: Невалидный цвет {color_str}, использую красный")
+                self.class_color = QColor(255, 0, 0)
+        
+        # Обновляем внешний вид
+        self.update_appearance()
+    
+    def update_appearance(self):
+        """Обновляет внешний вид объекта согласно выбранному классу"""
+        if self.class_color:
+            # Создаем полупрозрачный цвет для заливки
+            fill_color = QColor(self.class_color)
+            fill_color.setAlpha(50)  # 20% непрозрачность
+            
+            # Устанавливаем цвет контура и заливки
+            self.setPen(QPen(self.class_color, 2, Qt.SolidLine))
+            self.setBrush(fill_color)
+            
+            # Отладочная информация
+            print(f"Обновляю внешний вид прямоугольника: ID класса={self.class_id}, цвет={self.class_color.name()}")
+        else:
+            # Стандартный красный цвет, если класс не выбран
+            self.setPen(QPen(QColor(255, 0, 0), 2, Qt.SolidLine))
+            self.setBrush(QColor(255, 0, 0, 50))
+            print("Устанавливаю стандартный красный цвет для прямоугольника")
     
     def get_image_rect(self):
         """Получить прямоугольник изображения"""
@@ -356,8 +405,56 @@ class SelectablePolygonItem(QGraphicsPolygonItem):
         self.mouse_press_pos = None
         self.scene = scene
         
+        # Свойства для класса сегментации
+        self.class_id = None
+        self.class_name = None
+        self.class_color = None
+        
         # Установка обработки наведения мыши
         self.setAcceptHoverEvents(True)
+    
+    def set_class(self, class_data):
+        """Устанавливает класс сегментации для объекта"""
+        if class_data is None:
+            self.class_id = None
+            self.class_name = None
+            self.class_color = QColor(0, 255, 0)  # Зеленый по умолчанию для полигонов
+            print("Устанавливаю None класс для полигона")
+        else:
+            self.class_id = class_data.get('id')
+            self.class_name = class_data.get('name')
+            
+            # Получаем цвет из строки вида "#RRGGBB"
+            color_str = class_data.get('color', '#00FF00')
+            print(f"Устанавливаю класс для полигона: {self.class_name}, ID={self.class_id}, цвет={color_str}")
+            self.class_color = QColor(color_str)
+            
+            # Проверка правильности преобразования цвета
+            if not self.class_color.isValid():
+                print(f"Ошибка: Невалидный цвет {color_str}, использую зеленый")
+                self.class_color = QColor(0, 255, 0)
+        
+        # Обновляем внешний вид
+        self.update_appearance()
+    
+    def update_appearance(self):
+        """Обновляет внешний вид объекта согласно выбранному классу"""
+        if self.class_color:
+            # Создаем полупрозрачный цвет для заливки
+            fill_color = QColor(self.class_color)
+            fill_color.setAlpha(50)  # 20% непрозрачность
+            
+            # Устанавливаем цвет контура и заливки
+            self.setPen(QPen(self.class_color, 2, Qt.SolidLine))
+            self.setBrush(fill_color)
+            
+            # Отладочная информация
+            print(f"Обновляю внешний вид полигона: ID класса={self.class_id}, цвет={self.class_color.name()}")
+        else:
+            # Стандартный зеленый цвет, если класс не выбран
+            self.setPen(QPen(QColor(0, 255, 0), 2, Qt.SolidLine))
+            self.setBrush(QColor(0, 255, 0, 50))
+            print("Устанавливаю стандартный зеленый цвет для полигона")
     
     def get_image_rect(self):
         """Получить прямоугольник изображения"""
@@ -595,13 +692,26 @@ class ImageViewerWidget(QWidget):
     MODE_EDIT = 2
     MODE_POLYGON_SELECT = 3
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, class_manager=None):
         super().__init__(parent)
         self.image = None  # Исходное QImage (RGB)
         self.current_adjusted_image = None
         self.original_np = None  # NumPy-массив исходного изображения в формате RGB (float32)
         self.zoom_factor = 1.0
-        self.annotations = []  # Здесь будем хранить данные о созданных фигурах
+        self.annotations = []  # Текущие активные аннотации для отображаемого изображения
+        
+        # Словарь для хранения аннотаций для каждого изображения
+        # Ключ - путь к изображению, значение - список нормализованных аннотаций
+        self.annotations_by_image = {}
+        
+        # Текущий путь к изображению
+        self.current_image_path = None
+        
+        # Класс-менеджер для связи с классами сегментации
+        self.class_manager = class_manager
+        
+        # Создаем виджет для назначения классов объектам
+        self.object_labeler = None
         
         # Переменные для режима выделения прямоугольника
         self.current_mode = self.MODE_VIEW
@@ -616,6 +726,18 @@ class ImageViewerWidget(QWidget):
         
         self._init_ui()
         self._init_adjustments()
+        
+    def set_class_manager(self, class_manager):
+        """Устанавливает менеджер классов сегментации"""
+        self.class_manager = class_manager
+        
+        # Создаем или обновляем ObjectLabelerWidget
+        if self.object_labeler is None:
+            self.object_labeler = ObjectLabelerWidget(self, self.class_manager)
+            self.object_labeler.classAssigned.connect(self.on_class_assigned)
+            self.object_labeler.newClassRequested.connect(self.request_new_class)
+        else:
+            self.object_labeler.class_manager = class_manager
 
     def _init_ui(self):
         main_layout = QHBoxLayout(self)
@@ -642,6 +764,18 @@ class ImageViewerWidget(QWidget):
         self.toolbar.addAction(self.action_rect_select)
         self.toolbar.addAction(self.action_polygon_select)
         self.toolbar.addAction(self.action_edit)
+        
+        # Добавляем разделитель
+        self.toolbar.addSeparator()
+        
+        # Добавляем действия для экспорта/импорта аннотаций
+        self.action_export_annotations = QAction("Экспорт аннотаций", self)
+        self.action_export_annotations.triggered.connect(self.show_export_annotations_dialog)
+        self.toolbar.addAction(self.action_export_annotations)
+        
+        self.action_import_annotations = QAction("Импорт аннотаций", self)
+        self.action_import_annotations.triggered.connect(self.show_import_annotations_dialog)
+        self.toolbar.addAction(self.action_import_annotations)
         
         # Устанавливаем политику размера для панели инструментов
         self.toolbar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
@@ -704,9 +838,15 @@ class ImageViewerWidget(QWidget):
         self.gamma = 1.0
 
     def load_image(self, file_path):
+        # Сохраняем текущие аннотации перед загрузкой нового изображения
+        if self.current_image_path and self.annotations:
+            print(f"Сохраняю {len(self.annotations)} аннотаций для {self.current_image_path}")
+            self.save_current_annotations()
+            
         qimg = QImage(file_path).convertToFormat(QImage.Format_RGB888)
         if qimg.isNull():
             return False
+            
         # Если изображение слишком большое, уменьшаем его
         MAX_PIXELS = 2000000
         w = qimg.width()
@@ -728,10 +868,19 @@ class ImageViewerWidget(QWidget):
         # Устанавливаем границы изображения для отображения перекрестия
         self.scene.setImageRect(self.pixmap_item.boundingRect())
         
+        # Очищаем текущие аннотации
         self.annotations.clear()
+        
+        # Устанавливаем текущий путь к изображению
+        self.current_image_path = file_path
+        
+        # Загружаем ранее сохраненные аннотации для этого изображения
+        self.load_annotations_for_image(file_path)
+        
         self.zoom_factor = 1.0
         self.view.resetTransform()
 
+        print(f"Загружено изображение: {file_path}, восстановлено аннотаций: {len(self.annotations)}")
         return True
 
     def update_image_adjustments(self):
@@ -846,13 +995,26 @@ class ImageViewerWidget(QWidget):
             # В режиме редактирования позволяем событиям проходить к элементам сцены
             if self.current_mode == self.MODE_EDIT:
                 # Проверяем, что это событие мыши, прежде чем вызывать pos()
-                if event.type() in [event.MouseButtonPress, event.MouseButtonRelease, event.MouseMove]:
+                if event.type() in [event.MouseButtonPress, event.MouseButtonRelease, event.MouseMove, event.MouseButtonDblClick]:
                     scene_pos = self.view.mapToScene(event.pos())
                     items = self.scene.items(scene_pos)
                     
-                    # Проверяем, есть ли под курсором выделяемый прямоугольник
+                    # Проверяем, есть ли под курсором выделяемый объект
                     for item in items:
-                        if isinstance(item, SelectableRectItem):
+                        if isinstance(item, (SelectableRectItem, SelectablePolygonItem)):
+                            # Если это двойной клик, показываем диалог выбора класса
+                            if event.type() == event.MouseButtonDblClick and event.button() == Qt.LeftButton:
+                                # Выбираем объект перед открытием диалога
+                                item.setSelected(True)
+                                self.selected_item = item
+                                
+                                # Вызываем диалог выбора класса
+                                self.show_object_labeler(item)
+                                return True
+                            # Если это нажатие кнопки мыши, запоминаем выбранный объект
+                            elif event.type() == event.MouseButtonPress and event.button() == Qt.LeftButton:
+                                self.selected_item = item
+                            
                             # Позволяем событию пройти дальше для обработки элементом
                             return False
             
@@ -980,6 +1142,10 @@ class ImageViewerWidget(QWidget):
                 rect_item.setFlag(QGraphicsItem.ItemIsMovable, False)
                 self.scene.addItem(rect_item)
                 self.annotations.append(rect_item)
+                
+                # Показываем диалог выбора класса для нового прямоугольника
+                if self.class_manager:
+                    self.show_object_labeler(rect_item)
             
             self.current_rect = None
             self.start_point = None
@@ -1015,6 +1181,10 @@ class ImageViewerWidget(QWidget):
         self.scene.addItem(polygon_item)
         self.annotations.append(polygon_item)
         
+        # Показываем диалог выбора класса для нового полигона
+        if self.class_manager:
+            self.show_object_labeler(polygon_item)
+        
         # Сбрасываем переменные
         self.current_polygon = None
         self.polygon_points = []
@@ -1030,6 +1200,13 @@ class ImageViewerWidget(QWidget):
                         self.annotations.remove(item)
             return
         
+        # Вызов диалога выбора класса при нажатии клавиши C
+        if self.current_mode == self.MODE_EDIT and event.key() == Qt.Key_C:
+            selected_items = self.scene.selectedItems()
+            if selected_items and isinstance(selected_items[0], (SelectableRectItem, SelectablePolygonItem)):
+                self.show_object_labeler(selected_items[0])
+                return
+        
         # Замыкание полигона при нажатии клавиши F
         if self.current_mode == self.MODE_POLYGON_SELECT and event.key() == Qt.Key_F:
             if len(self.polygon_points) >= 3:  # Полигон должен иметь хотя бы 3 точки
@@ -1037,6 +1214,336 @@ class ImageViewerWidget(QWidget):
                 return
             
         super().keyPressEvent(event)
+
+    def on_class_assigned(self, annotation_object, class_data):
+        """Обработчик события назначения класса объекту"""
+        if annotation_object and hasattr(annotation_object, 'set_class'):
+            # Устанавливаем класс для объекта
+            annotation_object.set_class(class_data)
+            
+            # Явно вызываем обновление сцены для перерисовки объекта
+            if self.scene:
+                self.scene.update()
+    
+    def request_new_class(self):
+        """Запрашивает создание нового класса через менеджер классов"""
+        if self.class_manager and hasattr(self.class_manager, 'openAddClassDialog'):
+            # Если диалог выбора класса открыт, сначала закрываем его
+            if self.object_labeler and self.object_labeler.isVisible():
+                current_object = self.object_labeler.current_object
+                self.object_labeler.close()
+            else:
+                current_object = None
+                
+            # Открываем диалог добавления класса
+            self.class_manager.openAddClassDialog()
+            
+            # После создания нового класса
+            if current_object:
+                # Снова открываем диалог выбора класса для текущего объекта
+                self.show_object_labeler(current_object)
+                
+                # Выбираем последний добавленный класс
+                classes = self.class_manager.get_all_classes()
+                if classes and self.object_labeler:
+                    self.object_labeler.class_combo.setCurrentIndex(len(classes))
+    
+    def show_object_labeler(self, annotation_object):
+        """Показывает диалог назначения класса для объекта"""
+        if not self.class_manager or not annotation_object:
+            print("Не могу показать диалог назначения класса: нет менеджера классов или объекта")
+            return
+            
+        print(f"Показываю диалог назначения класса для объекта типа {type(annotation_object).__name__}")
+            
+        # Создаем ObjectLabelerWidget, если его еще нет
+        if not self.object_labeler:
+            self.object_labeler = ObjectLabelerWidget(self, self.class_manager)
+            self.object_labeler.classAssigned.connect(self.on_class_assigned)
+            self.object_labeler.newClassRequested.connect(self.request_new_class)
+        
+        # Устанавливаем текущий объект и показываем диалог
+        self.object_labeler.set_current_object(annotation_object)
+        result = self.object_labeler.exec_()
+        
+        print(f"Диалог закрылся с результатом: {result} (1=принят, 0=отклонен)")
+
+    def normalize_rect_coords(self, rect):
+        """
+        Преобразует абсолютные координаты прямоугольника в нормализованные (от 0 до 1)
+        """
+        if not self.pixmap_item:
+            return rect
+            
+        img_rect = self.pixmap_item.boundingRect()
+        img_width = img_rect.width()
+        img_height = img_rect.height()
+        
+        # Нормализуем координаты относительно размеров изображения
+        norm_x = (rect.x() - img_rect.x()) / img_width
+        norm_y = (rect.y() - img_rect.y()) / img_height
+        norm_width = rect.width() / img_width
+        norm_height = rect.height() / img_height
+        
+        return QRectF(norm_x, norm_y, norm_width, norm_height)
+    
+    def denormalize_rect_coords(self, norm_rect):
+        """
+        Преобразует нормализованные координаты прямоугольника (от 0 до 1) в абсолютные
+        """
+        if not self.pixmap_item:
+            return norm_rect
+            
+        img_rect = self.pixmap_item.boundingRect()
+        img_width = img_rect.width()
+        img_height = img_rect.height()
+        
+        # Денормализуем координаты относительно размеров изображения
+        x = norm_rect.x() * img_width + img_rect.x()
+        y = norm_rect.y() * img_height + img_rect.y()
+        width = norm_rect.width() * img_width
+        height = norm_rect.height() * img_height
+        
+        return QRectF(x, y, width, height)
+    
+    def normalize_polygon_points(self, points):
+        """
+        Преобразует абсолютные координаты точек полигона в нормализованные (от 0 до 1)
+        """
+        if not self.pixmap_item or not points:
+            return points
+            
+        img_rect = self.pixmap_item.boundingRect()
+        img_width = img_rect.width()
+        img_height = img_rect.height()
+        
+        # Нормализуем координаты относительно размеров изображения
+        norm_points = []
+        for point in points:
+            norm_x = (point.x() - img_rect.x()) / img_width
+            norm_y = (point.y() - img_rect.y()) / img_height
+            norm_points.append(QPointF(norm_x, norm_y))
+            
+        return norm_points
+    
+    def denormalize_polygon_points(self, norm_points):
+        """
+        Преобразует нормализованные координаты точек полигона (от 0 до 1) в абсолютные
+        """
+        if not self.pixmap_item or not norm_points:
+            return norm_points
+            
+        img_rect = self.pixmap_item.boundingRect()
+        img_width = img_rect.width()
+        img_height = img_rect.height()
+        
+        # Денормализуем координаты относительно размеров изображения
+        points = []
+        for norm_point in norm_points:
+            x = norm_point.x() * img_width + img_rect.x()
+            y = norm_point.y() * img_height + img_rect.y()
+            points.append(QPointF(x, y))
+            
+        return points
+    
+    def save_current_annotations(self):
+        """
+        Сохраняет текущие аннотации для текущего изображения
+        """
+        if not self.current_image_path:
+            return
+        
+        # Список для хранения нормализованных данных
+        normalized_annotations = []
+        
+        # Обходим все аннотации
+        for annotation in self.annotations:
+            if isinstance(annotation, SelectableRectItem):
+                # Для прямоугольников сохраняем нормализованные координаты и класс
+                rect = annotation.rect()
+                norm_rect = self.normalize_rect_coords(rect)
+                class_data = {
+                    'id': annotation.class_id,
+                    'name': annotation.class_name,
+                    'color': annotation.class_color.name() if annotation.class_color else None
+                }
+                
+                normalized_annotations.append({
+                    'type': 'rect',
+                    'coords': {
+                        'x': norm_rect.x(),
+                        'y': norm_rect.y(),
+                        'width': norm_rect.width(),
+                        'height': norm_rect.height()
+                    },
+                    'class': class_data
+                })
+            
+            elif isinstance(annotation, SelectablePolygonItem):
+                # Для полигонов сохраняем нормализованные точки и класс
+                points = []
+                for i in range(annotation.polygon().count()):
+                    points.append(annotation.polygon().at(i))
+                
+                norm_points = self.normalize_polygon_points(points)
+                norm_points_data = []
+                
+                for point in norm_points:
+                    norm_points_data.append({'x': point.x(), 'y': point.y()})
+                
+                class_data = {
+                    'id': annotation.class_id,
+                    'name': annotation.class_name,
+                    'color': annotation.class_color.name() if annotation.class_color else None
+                }
+                
+                normalized_annotations.append({
+                    'type': 'polygon',
+                    'points': norm_points_data,
+                    'class': class_data
+                })
+        
+        # Сохраняем нормализованные аннотации для текущего изображения
+        self.annotations_by_image[self.current_image_path] = normalized_annotations
+    
+    def load_annotations_for_image(self, image_path):
+        """
+        Загружает и отображает аннотации для указанного изображения
+        """
+        # Очищаем текущие аннотации
+        for annotation in self.annotations:
+            self.scene.removeItem(annotation)
+        self.annotations.clear()
+        
+        # Если нет сохраненных аннотаций для этого изображения, выходим
+        if image_path not in self.annotations_by_image:
+            return
+            
+        normalized_annotations = self.annotations_by_image[image_path]
+        
+        # Восстанавливаем аннотации из нормализованных данных
+        for annotation_data in normalized_annotations:
+            if annotation_data['type'] == 'rect':
+                # Восстанавливаем прямоугольник
+                coords = annotation_data['coords']
+                norm_rect = QRectF(coords['x'], coords['y'], coords['width'], coords['height'])
+                rect = self.denormalize_rect_coords(norm_rect)
+                
+                # Создаем прямоугольник
+                rect_item = SelectableRectItem(rect.x(), rect.y(), rect.width(), rect.height(), None, self)
+                rect_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+                rect_item.setFlag(QGraphicsItem.ItemIsMovable, False)
+                
+                # Устанавливаем класс, если он есть
+                if 'class' in annotation_data and annotation_data['class']:
+                    rect_item.set_class(annotation_data['class'])
+                
+                self.scene.addItem(rect_item)
+                self.annotations.append(rect_item)
+                
+            elif annotation_data['type'] == 'polygon':
+                # Восстанавливаем полигон
+                norm_points_data = annotation_data['points']
+                norm_points = []
+                
+                for point_data in norm_points_data:
+                    norm_points.append(QPointF(point_data['x'], point_data['y']))
+                
+                points = self.denormalize_polygon_points(norm_points)
+                
+                # Создаем полигон
+                polygon_item = SelectablePolygonItem(points, None, self)
+                polygon_item.scene_obj = self.scene
+                polygon_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+                polygon_item.setFlag(QGraphicsItem.ItemIsMovable, False)
+                
+                # Устанавливаем класс, если он есть
+                if 'class' in annotation_data and annotation_data['class']:
+                    polygon_item.set_class(annotation_data['class'])
+                
+                self.scene.addItem(polygon_item)
+                self.annotations.append(polygon_item)
+
+    def export_annotations_to_json(self, output_file):
+        """
+        Экспортирует все аннотации в JSON-файл
+        """
+        # Сохраняем текущие аннотации перед экспортом
+        if self.current_image_path and self.annotations:
+            self.save_current_annotations()
+            
+        import json
+        import os
+        
+        # Создаем словарь для JSON-файла
+        data = {
+            'version': '1.0',
+            'images': {}
+        }
+        
+        # Преобразуем пути к относительным, если возможно
+        base_dir = os.path.dirname(output_file)
+        
+        for img_path, annotations in self.annotations_by_image.items():
+            # Пытаемся создать относительный путь
+            try:
+                rel_path = os.path.relpath(img_path, base_dir)
+            except:
+                rel_path = img_path
+                
+            data['images'][rel_path] = annotations
+        
+        # Записываем в JSON-файл с отступами для читаемости
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            
+        print(f"Экспортированы аннотации для {len(self.annotations_by_image)} изображений в {output_file}")
+        return True
+    
+    def import_annotations_from_json(self, input_file):
+        """
+        Импортирует аннотации из JSON-файла
+        """
+        import json
+        import os
+        
+        # Очищаем текущие сохраненные аннотации
+        self.annotations_by_image.clear()
+        
+        try:
+            with open(input_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            # Проверяем версию формата
+            if 'version' not in data or data['version'] != '1.0':
+                print(f"Предупреждение: неизвестная версия формата аннотаций: {data.get('version', 'неизвестна')}")
+                
+            # Если есть данные для изображений
+            if 'images' in data and isinstance(data['images'], dict):
+                base_dir = os.path.dirname(input_file)
+                
+                # Загружаем аннотации для каждого изображения
+                for rel_path, annotations in data['images'].items():
+                    # Преобразуем относительный путь в абсолютный
+                    if not os.path.isabs(rel_path):
+                        abs_path = os.path.normpath(os.path.join(base_dir, rel_path))
+                    else:
+                        abs_path = rel_path
+                        
+                    # Сохраняем аннотации для этого изображения
+                    self.annotations_by_image[abs_path] = annotations
+                    
+                print(f"Импортированы аннотации для {len(self.annotations_by_image)} изображений из {input_file}")
+                
+                # Если текущее изображение есть среди импортированных, загружаем его аннотации
+                if self.current_image_path in self.annotations_by_image:
+                    self.load_annotations_for_image(self.current_image_path)
+                    
+                return True
+        except Exception as e:
+            print(f"Ошибка при импорте аннотаций: {str(e)}")
+            
+        return False
 
 
 if __name__ == "__main__":

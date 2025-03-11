@@ -44,7 +44,14 @@ class MainWindow(QMainWindow):
         
         # Стек для ImageViewer и VideoPlayer
         self.media_stack = QStackedWidget()
-        self.image_viewer = ImageViewerWidget()
+        
+        # Создаем менеджер классов сегментации
+        self.class_manager = SegmentationClassManagerWidget()
+        
+        # Создаем ImageViewer и связываем его с менеджером классов
+        self.image_viewer = ImageViewerWidget(class_manager=self.class_manager)
+        
+        # Создаем VideoPlayer
         self.video_player = VideoPlayer()
         
         self.media_stack.addWidget(self.image_viewer)  # Индекс 0
@@ -59,9 +66,6 @@ class MainWindow(QMainWindow):
         
         # Устанавливаем начальные размеры разделителей
         left_splitter.setSizes([600, 200])  # 3:1 соотношение для верх:низ
-        
-        # Правая панель: SegmentationClassManager
-        self.class_manager = SegmentationClassManagerWidget()
         
         # Добавляем левую и правую панели в главный разделитель
         main_splitter.addWidget(left_widget)

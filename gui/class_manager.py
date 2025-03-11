@@ -302,3 +302,21 @@ class SegmentationClassManagerWidget(QWidget):
         if filePath:
             self.manager.export_to_json(filePath)
             QMessageBox.information(self, "Экспорт", f"Классы успешно экспортированы в {filePath}")
+
+    def get_all_classes(self):
+        """
+        Returns a list of all segmentation classes with their attributes.
+        This method is used by the ObjectLabelerWidget to display and assign classes.
+        """
+        classes_list = []
+        for name, cls in self.manager.classes.items():
+            # Create a copy of the class dictionary and add an 'id' field using the name
+            class_data = cls.copy()
+            class_data['id'] = name  # Use the name as the unique identifier
+            classes_list.append(class_data)
+        
+        print(f"get_all_classes: возвращаю {len(classes_list)} классов")
+        for i, cls in enumerate(classes_list):
+            print(f"  Класс {i+1}: {cls.get('name')}, ID={cls.get('id')}, цвет={cls.get('color')}")
+        
+        return classes_list
