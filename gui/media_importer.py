@@ -71,6 +71,8 @@ def generate_video_thumbnail(file_path):
 class MediaImporterWidget(QWidget):
     # Сигнал для передачи выбранного файла (путь, тип)
     mediaSelected = pyqtSignal(str, str)
+    # Сигнал для уведомления об изменении режима
+    modeChanged = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -128,12 +130,16 @@ class MediaImporterWidget(QWidget):
         self.btnImages.setChecked(True)
         self.btnVideos.setChecked(False)
         self.refresh_list()
+        # Отправляем сигнал об изменении режима
+        self.modeChanged.emit(self.mode)
 
     def switch_to_videos(self):
         self.mode = "video"
         self.btnVideos.setChecked(True)
         self.btnImages.setChecked(False)
         self.refresh_list()
+        # Отправляем сигнал об изменении режима
+        self.modeChanged.emit(self.mode)
 
     def import_directory(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Выберите директорию")

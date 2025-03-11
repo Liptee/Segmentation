@@ -836,10 +836,10 @@ class ImageViewerWidget(QWidget):
         self.polygon_points = []
 
     def eventFilter(self, obj, event):
-        """Фильтр событий для обработки событий мыши в viewport"""
+        """Обработчик всех событий для виджета просмотра"""
         if obj == self.view.viewport():
             # Обновляем позицию перекрестия при движении мыши
-            if event.type() == event.MouseMove and self.pixmap_item:
+            if event.type() == event.MouseMove and hasattr(self, 'pixmap_item') and self.pixmap_item:
                 scene_pos = self.view.mapToScene(event.pos())
                 self.scene.setCrosshairPos(scene_pos)
             
@@ -872,7 +872,7 @@ class ImageViewerWidget(QWidget):
         scene_pos = self.view.mapToScene(event.pos())
         
         # Проверяем, что точка находится в пределах изображения
-        if not (self.pixmap_item and self.pixmap_item.contains(scene_pos)):
+        if not hasattr(self, 'pixmap_item') or not self.pixmap_item or not self.pixmap_item.contains(scene_pos):
             return False
             
         # Обрабатываем в режиме выделения прямоугольника
@@ -886,32 +886,20 @@ class ImageViewerWidget(QWidget):
             self.scene.addItem(self.current_rect)
             
             return True
-            
+        
         # Обрабатываем в режиме выделения полигона
         elif self.current_mode == self.MODE_POLYGON_SELECT:
-            # Проверяем, близко ли текущая точка к первой точке (для замыкания полигона)
-            if len(self.polygon_points) > 2:
-                first_point = self.polygon_points[0]
-                dist = ((scene_pos.x() - first_point.x()) ** 2 + (scene_pos.y() - first_point.y()) ** 2) ** 0.5
-                
-                # Если расстояние меньше порога, замыкаем полигон
-                if dist < 10:  # 10 пикселей - порог для замыкания
-                    self.complete_polygon()
-                    return True
-            
-            # Добавляем новую точку
-            self.polygon_points.append(scene_pos)
-            
-            # Если это первая точка, создаем временный полигон
-            if len(self.polygon_points) == 1:
-                self.current_polygon = QGraphicsPolygonItem(QPolygonF([scene_pos]))
-                self.current_polygon.setPen(QPen(QColor(0, 255, 0), 2, Qt.DashLine))
-                self.current_polygon.setBrush(QColor(0, 255, 0, 50))
+            if not self.current_polygon:
+                # Начинаем новый полигон
+                self.polygon_points = [scene_pos]
+                self.current_polygon = QGraphicsPolygonItem(QPolygonF([QPointF(scene_pos.x(), scene_pos.y())]))
+                self.current_polygon.setPen(QPen(Qt.red, 2))
                 self.scene.addItem(self.current_polygon)
             else:
-                # Обновляем полигон
-                self.current_polygon.setPolygon(QPolygonF(self.polygon_points))
-            
+                # Добавляем новую точку к полигону
+                self.polygon_points.append(scene_pos)
+                poly = QPolygonF([QPointF(p.x(), p.y()) for p in self.polygon_points])
+                self.current_polygon.setPolygon(poly)
             return True
             
         return False
@@ -922,13 +910,13 @@ class ImageViewerWidget(QWidget):
         current_pos = self.view.mapToScene(event.pos())
         
         # Ограничиваем координаты границами изображения
-        if self.pixmap_item:
+        if hasattr(self, 'pixmap_item') and self.pixmap_item:
             pixmap_rect = self.pixmap_item.boundingRect()
             current_pos.setX(max(pixmap_rect.left(), min(current_pos.x(), pixmap_rect.right())))
             current_pos.setY(max(pixmap_rect.top(), min(current_pos.y(), pixmap_rect.bottom())))
         
         # Обрабатываем в режиме выделения прямоугольника
-        if self.current_mode == self.MODE_RECT_SELECT and self.start_point and self.current_rect:
+        if self.current_mode == self.MODE_RECT_SELECT and self.start_point and hasattr(self, 'current_rect') and self.current_rect:
             # Обновляем прямоугольник
             rect = QRectF(
                 min(self.start_point.x(), current_pos.x()),
@@ -960,12 +948,12 @@ class ImageViewerWidget(QWidget):
     def handle_mouse_release(self, event):
         """Обработка отпускания кнопки мыши"""
         # Обрабатываем в режиме выделения прямоугольника
-        if self.current_mode == self.MODE_RECT_SELECT and self.start_point and self.current_rect:
+        if self.current_mode == self.MODE_RECT_SELECT and self.start_point and hasattr(self, 'current_rect') and self.current_rect:
             # Получаем конечные координаты в сцене
             end_point = self.view.mapToScene(event.pos())
             
             # Ограничиваем координаты границами изображения
-            if self.pixmap_item:
+            if hasattr(self, 'pixmap_item') and self.pixmap_item:
                 pixmap_rect = self.pixmap_item.boundingRect()
                 end_point.setX(max(pixmap_rect.left(), min(end_point.x(), pixmap_rect.right())))
                 end_point.setY(max(pixmap_rect.top(), min(end_point.y(), pixmap_rect.bottom())))
