@@ -13,6 +13,7 @@ import numpy as np
 
 from gui.utils import convert_qimage_to_np, convert_np_to_qimage
 from gui.object_labeler import ObjectLabelerWidget
+from gui.geometry_utils import GeometryUtils
 
 
 class PinchableGraphicsView(QGraphicsView):
@@ -1211,82 +1212,32 @@ class ImageViewerWidget(QWidget):
         print(f"Диалог закрылся с результатом: {result} (1=принят, 0=отклонен)")
 
     def normalize_rect_coords(self, rect):
-        """
-        Преобразует абсолютные координаты прямоугольника в нормализованные (от 0 до 1)
-        """
         if not self.pixmap_item:
             return rect
             
         img_rect = self.pixmap_item.boundingRect()
-        img_width = img_rect.width()
-        img_height = img_rect.height()
-        
-        # Нормализуем координаты относительно размеров изображения
-        norm_x = (rect.x() - img_rect.x()) / img_width
-        norm_y = (rect.y() - img_rect.y()) / img_height
-        norm_width = rect.width() / img_width
-        norm_height = rect.height() / img_height
-        
-        return QRectF(norm_x, norm_y, norm_width, norm_height)
+        return GeometryUtils.normalize_rect(rect, img_rect)
     
     def denormalize_rect_coords(self, norm_rect):
-        """
-        Преобразует нормализованные координаты прямоугольника (от 0 до 1) в абсолютные
-        """
         if not self.pixmap_item:
             return norm_rect
             
         img_rect = self.pixmap_item.boundingRect()
-        img_width = img_rect.width()
-        img_height = img_rect.height()
-        
-        # Денормализуем координаты относительно размеров изображения
-        x = norm_rect.x() * img_width + img_rect.x()
-        y = norm_rect.y() * img_height + img_rect.y()
-        width = norm_rect.width() * img_width
-        height = norm_rect.height() * img_height
-        
-        return QRectF(x, y, width, height)
+        return GeometryUtils.denormalize_rect(norm_rect, img_rect)
     
     def normalize_polygon_points(self, points):
-        """
-        Преобразует абсолютные координаты точек полигона в нормализованные (от 0 до 1)
-        """
         if not self.pixmap_item or not points:
             return points
             
         img_rect = self.pixmap_item.boundingRect()
-        img_width = img_rect.width()
-        img_height = img_rect.height()
-        
-        # Нормализуем координаты относительно размеров изображения
-        norm_points = []
-        for point in points:
-            norm_x = (point.x() - img_rect.x()) / img_width
-            norm_y = (point.y() - img_rect.y()) / img_height
-            norm_points.append(QPointF(norm_x, norm_y))
-            
-        return norm_points
+        return GeometryUtils.normalize_points(points, img_rect)
     
     def denormalize_polygon_points(self, norm_points):
-        """
-        Преобразует нормализованные координаты точек полигона (от 0 до 1) в абсолютные
-        """
         if not self.pixmap_item or not norm_points:
             return norm_points
             
         img_rect = self.pixmap_item.boundingRect()
-        img_width = img_rect.width()
-        img_height = img_rect.height()
-        
-        # Денормализуем координаты относительно размеров изображения
-        points = []
-        for norm_point in norm_points:
-            x = norm_point.x() * img_width + img_rect.x()
-            y = norm_point.y() * img_height + img_rect.y()
-            points.append(QPointF(x, y))
-            
-        return points
+        return GeometryUtils.denormalize_points(norm_points, img_rect)
     
     def save_current_annotations(self):
         """
