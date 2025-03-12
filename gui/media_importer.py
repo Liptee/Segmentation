@@ -100,16 +100,6 @@ class MediaImporterWidget(QWidget):
         modeLayout.addWidget(self.btnVideos)
         mainLayout.addLayout(modeLayout)
 
-        # Панель кнопок импорта
-        btnLayout = QHBoxLayout()
-        self.btnImportDir = QPushButton("Импортировать из директории")
-        self.btnImportDir.clicked.connect(self.import_directory)
-        btnLayout.addWidget(self.btnImportDir)
-        self.btnImportFiles = QPushButton("Импортировать файл(ы)")
-        self.btnImportFiles.clicked.connect(self.import_files)
-        btnLayout.addWidget(self.btnImportFiles)
-        mainLayout.addLayout(btnLayout)
-
         # Виджет для отображения миниатюр (в виде плитки)
         self.listWidget = QListWidget()
         self.listWidget.setViewMode(QListWidget.IconMode)
@@ -122,6 +112,16 @@ class MediaImporterWidget(QWidget):
         self.listWidget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.listWidget.customContextMenuRequested.connect(self.show_context_menu)
         mainLayout.addWidget(self.listWidget)
+
+        # Панель кнопок импорта (перемещена под список)
+        btnLayout = QHBoxLayout()
+        self.btnImportDir = QPushButton("Импортировать из директории")
+        self.btnImportDir.clicked.connect(self.import_directory)
+        btnLayout.addWidget(self.btnImportDir)
+        self.btnImportFiles = QPushButton("Импортировать файл(ы)")
+        self.btnImportFiles.clicked.connect(self.import_files)
+        btnLayout.addWidget(self.btnImportFiles)
+        mainLayout.addLayout(btnLayout)
 
         self.setLayout(mainLayout)
 
