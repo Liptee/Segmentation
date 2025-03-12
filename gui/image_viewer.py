@@ -792,18 +792,15 @@ class ImageViewerWidget(QWidget):
             self.save_current_annotations()
             
         qimg = QImage(file_path).convertToFormat(QImage.Format_RGB888)
+        logger.info(f"ImageViewer: Размер изображения оригинального QImage: {qimg.size()}")
         if qimg.isNull():
             return False
         
-        """
-        Где-то в этой функции есть проблема. При загрузке изображения с
-        нечетным параметром ширины или высоты, отображаемое изображение
-        искажается.
-        """
         w = qimg.width()
         h = qimg.height()
         self.image = qimg
         self.original_np = convert_qimage_to_np(self.image)
+        logger.info(f"ImageViewer: Размер изображения оригинального NumPy-массива: {self.original_np.shape}")
         # Если изображение слишком большое, уменьшаем его
         if w * h > MAX_PIXELS:
             scale = np.sqrt(MAX_PIXELS / (w * h))
