@@ -256,7 +256,6 @@ class MediaImporterWidget(QWidget):
     def delete_selected_items(self):
         # Создаем копию списка выбранных элементов
         selected_items = list(self.listWidget.selectedItems())
-        print(selected_items)
         if not selected_items:
             return
         for item in selected_items:

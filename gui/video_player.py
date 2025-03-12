@@ -13,6 +13,7 @@ import os
 import tempfile
 import uuid
 import cv2
+from logger import logger
 
 class ClickableVideoWidget(QVideoWidget):
     clicked = pyqtSignal()
@@ -183,7 +184,7 @@ class VideoPlayer(QWidget):
                         frame_image = QImage(cv_frame.data, width, height, bytes_per_line, QImage.Format_RGB888)
                     cap.release()
             except Exception as e:
-                print(f"Ошибка OpenCV: {e}")
+                logger.info(f"VideoPlayer: Ошибка OpenCV: {e}")
         
         if frame_image is None:
             QMessageBox.warning(self, "Ошибка", "Не удалось получить кадр из видео.")
@@ -201,7 +202,7 @@ class VideoPlayer(QWidget):
         if frame_image.save(frame_path, "PNG"):
             # Сообщаем MediaImporter о новом кадре
             self.frameSaved.emit(frame_path)
-            print(f"Кадр сохранен: {frame_path}")
+            logger.info(f"VideoPlayer: Кадр сохранен: {frame_path}")
             
             # Показываем уведомление о сохранении
             self.show_save_notification()
@@ -279,10 +280,10 @@ class VideoPlayer(QWidget):
                     bytes_per_line = 3 * width
                     # Сохраняем первый кадр
                     self.current_frame = QImage(cv_frame.data, width, height, bytes_per_line, QImage.Format_RGB888).copy()
-                    print("Первый кадр успешно загружен")
+                    logger.info("VideoPlayer: Первый кадр успешно загружен")
                 cap.release()
         except Exception as e:
-            print(f"Ошибка при предзагрузке кадра: {e}")
+            logger.info(f"VideoPlayer: Ошибка при предзагрузке кадра: {e}")
 
     def load_video(self, video_path):
         self.current_video_path = video_path  # Сохраняем путь к видео
@@ -322,7 +323,7 @@ class VideoPlayer(QWidget):
 
     def handle_error(self):
         error_string = self.mediaPlayer.errorString()
-        print("Ошибка:", error_string)
+        logger.info(f"VideoPlayer: Ошибка: {error_string}")
 
     @staticmethod
     def convert_qimage_to_np(qimage):

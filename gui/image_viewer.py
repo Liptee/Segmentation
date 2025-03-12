@@ -1,3 +1,5 @@
+import json
+import os
 import cv2
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSlider, QLabel,
@@ -14,6 +16,19 @@ import numpy as np
 from gui.utils import convert_qimage_to_np, convert_np_to_qimage
 from gui.object_labeler import ObjectLabelerWidget
 from gui.geometry_utils import GeometryUtils
+from logger import logger
+
+
+
+"""
+Данная константа MAX_PIXELS определяет максимальное количество пикселей в изображении,
+которое будет отображаться в окне просмотра.
+Если изображение превышает это значение, оно будет масштабировано.
+Данное решение необходимо, чтобы не загружать в память большие изображения,
+которые также сильно нагружают систему при изменениях параметров яркости:
+"""
+MAX_PIXELS = 2000000 # 2 мегапикселя
+
 
 
 class PinchableGraphicsView(QGraphicsView):
@@ -71,15 +86,15 @@ class ClassAnnotatableMixin:
             self.class_id = None
             self.class_name = None
             self.class_color = self.get_default_color()
-            print(f"Устанавливаю None класс для {self.__class__.__name__}")
+            logger.info(f"ImageViewer: Устанавливаю None класс для {self.__class__.__name__}")
         else:
             self.class_id = class_data.get('id')
             self.class_name = class_data.get('name')
             color_str = class_data.get('color', self.get_default_color_str())
-            print(f"Устанавливаю класс для {self.__class__.__name__}: {self.class_name}, ID={self.class_id}, цвет={color_str}")
+            logger.info(f"ImageViewer: Устанавливаю класс для {self.__class__.__name__}: {self.class_name}, ID={self.class_id}, цвет={color_str}")
             self.class_color = QColor(color_str)
             if not self.class_color.isValid():
-                print(f"Ошибка: Невалидный цвет {color_str}, использую {self.get_default_color_str()}")
+                logger.info(f"ImageViewer: Ошибка: Невалидный цвет {color_str}, использую {self.get_default_color_str()}")
                 self.class_color = self.get_default_color()
 
         self.update_appearance()
@@ -94,14 +109,14 @@ class ClassAnnotatableMixin:
             fill_color.setAlpha(self.get_default_alpha())
             self.setPen(QPen(self.class_color, 2, Qt.SolidLine))
             self.setBrush(fill_color)
-            print(f"Обновляю внешний вид {self.__class__.__name__}: ID класса={self.class_id}, цвет={self.class_color.name()}")
+            logger.info(f"ImageViewer: Обновляю внешний вид {self.__class__.__name__}: ID класса={self.class_id}, цвет={self.class_color.name()}")
         else:
             default = self.get_default_color()
             self.setPen(QPen(default, 2, Qt.SolidLine))
             fill_color = QColor(default)
             fill_color.setAlpha(self.get_default_alpha())
             self.setBrush(fill_color)
-            print(f"Устанавливаю стандартный цвет {default.name()} для {self.__class__.__name__}")
+            logger.info(f"ImageViewer: Устанавливаю стандартный цвет {default.name()} для {self.__class__.__name__}")
 
 
 class ImageRectMixin:
@@ -711,15 +726,6 @@ class ImageViewerWidget(QWidget):
         # Добавляем разделитель
         self.toolbar.addSeparator()
         
-        # Добавляем действия для экспорта/импорта аннотаций
-        # self.action_export_annotations = QAction("Экспорт аннотаций", self)
-        # self.action_export_annotations.triggered.connect(self.show_export_annotations_dialog)
-        # self.toolbar.addAction(self.action_export_annotations)
-        
-        # self.action_import_annotations = QAction("Импорт аннотаций", self)
-        # self.action_import_annotations.triggered.connect(self.show_import_annotations_dialog)
-        # self.toolbar.addAction(self.action_import_annotations)
-        
         # Устанавливаем политику размера для панели инструментов
         self.toolbar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         
@@ -781,21 +787,24 @@ class ImageViewerWidget(QWidget):
         self.gamma = 1.0
 
     def load_image(self, file_path):
-        # Сохраняем текущие аннотации перед загрузкой нового изображения
         if self.current_image_path and self.annotations:
-            print(f"Сохраняю {len(self.annotations)} аннотаций для {self.current_image_path}")
+            logger.info(f"ImageViewer: Сохраняю {len(self.annotations)} аннотаций для {self.current_image_path}")
             self.save_current_annotations()
             
         qimg = QImage(file_path).convertToFormat(QImage.Format_RGB888)
         if qimg.isNull():
             return False
-            
-        # Если изображение слишком большое, уменьшаем его
-        MAX_PIXELS = 2000000
+        
+        """
+        Где-то в этой функции есть проблема. При загрузке изображения с
+        нечетным параметром ширины или высоты, отображаемое изображение
+        искажается.
+        """
         w = qimg.width()
         h = qimg.height()
         self.image = qimg
         self.original_np = convert_qimage_to_np(self.image)
+        # Если изображение слишком большое, уменьшаем его
         if w * h > MAX_PIXELS:
             scale = np.sqrt(MAX_PIXELS / (w * h))
             new_w = int(w * scale)
@@ -805,9 +814,11 @@ class ImageViewerWidget(QWidget):
 
         self.current_adjusted_image = convert_np_to_qimage(self.original_np)
         self.scene.clear()
+
         self.pixmap_item = QGraphicsPixmapItem(QPixmap.fromImage(self.current_adjusted_image))
         self.scene.addItem(self.pixmap_item)
-        
+        self.update_image_adjustments()
+
         # Устанавливаем границы изображения для отображения перекрестия
         self.scene.setImageRect(self.pixmap_item.boundingRect())
         
@@ -823,7 +834,7 @@ class ImageViewerWidget(QWidget):
         self.zoom_factor = 1.0
         self.view.resetTransform()
 
-        print(f"Загружено изображение: {file_path}, восстановлено аннотаций: {len(self.annotations)}")
+        logger.info(f"ImageViewer: Загружено изображение: {file_path}, восстановлено аннотаций: {len(self.annotations)}")
         return True
 
     def update_image_adjustments(self):
@@ -1194,10 +1205,10 @@ class ImageViewerWidget(QWidget):
     def show_object_labeler(self, annotation_object):
         """Показывает диалог назначения класса для объекта"""
         if not self.class_manager or not annotation_object:
-            print("Не могу показать диалог назначения класса: нет менеджера классов или объекта")
+            logger.info("ImageViewer: Не могу показать диалог назначения класса: нет менеджера классов или объекта")
             return
             
-        print(f"Показываю диалог назначения класса для объекта типа {type(annotation_object).__name__}")
+        logger.info(f"ImageViewer: Показываю диалог назначения класса для объекта типа {type(annotation_object).__name__}")
             
         # Создаем ObjectLabelerWidget, если его еще нет
         if not self.object_labeler:
@@ -1209,7 +1220,7 @@ class ImageViewerWidget(QWidget):
         self.object_labeler.set_current_object(annotation_object)
         result = self.object_labeler.exec_()
         
-        print(f"Диалог закрылся с результатом: {result} (1=принят, 0=отклонен)")
+        logger.info(f"ImageViewer: Диалог закрылся с результатом: {result} (1=принят, 0=отклонен)")
 
     def normalize_rect_coords(self, rect):
         if not self.pixmap_item:
@@ -1364,9 +1375,6 @@ class ImageViewerWidget(QWidget):
         # Сохраняем текущие аннотации перед экспортом
         if self.current_image_path and self.annotations:
             self.save_current_annotations()
-            
-        import json
-        import os
         
         # Создаем словарь для JSON-файла
         data = {
@@ -1390,16 +1398,13 @@ class ImageViewerWidget(QWidget):
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             
-        print(f"Экспортированы аннотации для {len(self.annotations_by_image)} изображений в {output_file}")
+        logger.info(f"ImageViewer: Экспортированы аннотации для {len(self.annotations_by_image)} изображений в {output_file}")
         return True
     
     def import_annotations_from_json(self, input_file):
         """
         Импортирует аннотации из JSON-файла
         """
-        import json
-        import os
-        
         # Очищаем текущие сохраненные аннотации
         self.annotations_by_image.clear()
         
@@ -1409,7 +1414,7 @@ class ImageViewerWidget(QWidget):
                 
             # Проверяем версию формата
             if 'version' not in data or data['version'] != '1.0':
-                print(f"Предупреждение: неизвестная версия формата аннотаций: {data.get('version', 'неизвестна')}")
+                logger.info(f"ImageViewer: Предупреждение: неизвестная версия формата аннотаций: {data.get('version', 'неизвестна')}")
                 
             # Если есть данные для изображений
             if 'images' in data and isinstance(data['images'], dict):
@@ -1426,7 +1431,7 @@ class ImageViewerWidget(QWidget):
                     # Сохраняем аннотации для этого изображения
                     self.annotations_by_image[abs_path] = annotations
                     
-                print(f"Импортированы аннотации для {len(self.annotations_by_image)} изображений из {input_file}")
+                logger.info(f"ImageViewer: Импортированы аннотации для {len(self.annotations_by_image)} изображений из {input_file}")
                 
                 # Если текущее изображение есть среди импортированных, загружаем его аннотации
                 if self.current_image_path in self.annotations_by_image:
@@ -1434,18 +1439,5 @@ class ImageViewerWidget(QWidget):
                     
                 return True
         except Exception as e:
-            print(f"Ошибка при импорте аннотаций: {str(e)}")
-            
+            logger.info(f"ImageViewer: Ошибка при импорте аннотаций: {str(e)}")
         return False
-
-
-if __name__ == "__main__":
-    import sys
-    from PyQt5.QtWidgets import QApplication
-    app = QApplication(sys.argv)
-    viewer = ImageViewerWidget()
-    viewer.setWindowTitle("Просмотр и обработка изображений")
-    viewer.resize(1000, 700)
-    viewer.load_image("/Users/mac/Pictures/IMG_5257.jpeg")
-    viewer.show()
-    sys.exit(app.exec_())

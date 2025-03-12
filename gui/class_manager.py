@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QPixmap, QPainter, QBrush, QColor, QIcon
 from PyQt5.QtCore import Qt
 from core.class_manager import SegmentationClassManager
+from logger import logger
 
 
 class AddClassDialog(QDialog):
@@ -315,8 +316,8 @@ class SegmentationClassManagerWidget(QWidget):
             class_data['id'] = name  # Use the name as the unique identifier
             classes_list.append(class_data)
         
-        print(f"get_all_classes: возвращаю {len(classes_list)} классов")
+        logger.info(f"ClassManager: get_all_classes: возвращаю {len(classes_list)} классов")
         for i, cls in enumerate(classes_list):
-            print(f"  Класс {i+1}: {cls.get('name')}, ID={cls.get('id')}, цвет={cls.get('color')}")
+            logger.info(f"ClassManager: Класс {i+1}: {cls.get('name')}, ID={cls.get('id')}, цвет={cls.get('color')}")
         
         return classes_list

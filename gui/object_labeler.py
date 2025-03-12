@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor
+from logger import logger
 
 
 class ObjectLabelerWidget(QDialog):
@@ -145,13 +146,13 @@ class ObjectLabelerWidget(QDialog):
                 
                 # Проверяем, что класс содержит все необходимые данные
                 if not selected_class.get('id') or not selected_class.get('color'):
-                    print(f"Предупреждение: класс не содержит id или color: {selected_class}")
+                    logger.info(f"ObjectLabeler: Предупреждение: класс не содержит id или color: {selected_class}")
                     
                 # Добавим отладочную информацию
-                print(f"Выбран класс: {selected_class.get('name')}, ID: {selected_class.get('id')}, Цвет: {selected_class.get('color')}")
+                logger.info(f"ObjectLabeler: Выбран класс: {selected_class.get('name')}, ID: {selected_class.get('id')}, Цвет: {selected_class.get('color')}")
             else:
                 selected_class = None
-                print(f"Ошибка: выбран индекс {index-1}, но всего классов {len(classes)}")
+                logger.info(f"ObjectLabeler: Ошибка: выбран индекс {index-1}, но всего классов {len(classes)}")
         
         # Излучаем сигнал с выбранным классом
         self.classAssigned.emit(self.current_object, selected_class)
