@@ -39,6 +39,70 @@ class PinchableGraphicsView(QGraphicsView):
             return True
         return False
 
+
+class ClassAnnotatableMixin:
+    """
+    Mixin для установки класса сегментации и обновления внешнего вида.
+    (Mixin for setting segmentation class and updating appearance.)
+    """
+
+    def get_default_color(self) -> QColor:
+        """Возвращает цвет по умолчанию.
+        (Returns the default color.)"""
+        return QColor(255, 0, 0)  # Красный по умолчанию
+
+    def get_default_color_str(self) -> str:
+        """Возвращает строковое представление цвета по умолчанию.
+        (Returns the default color as a string.)"""
+        return "#FF0000"
+
+    def get_default_alpha(self) -> int:
+        """Возвращает уровень прозрачности для заливки.
+        (Returns the fill opacity.)"""
+        return 50
+
+    def set_class(self, class_data):
+        """
+        Устанавливает класс сегментации для объекта и обновляет внешний вид.
+        (Sets the segmentation class for the object and updates its appearance.)
+        """
+        if class_data is None:
+            self.class_id = None
+            self.class_name = None
+            self.class_color = self.get_default_color()
+            print(f"Устанавливаю None класс для {self.__class__.__name__}")
+        else:
+            self.class_id = class_data.get('id')
+            self.class_name = class_data.get('name')
+            color_str = class_data.get('color', self.get_default_color_str())
+            print(f"Устанавливаю класс для {self.__class__.__name__}: {self.class_name}, ID={self.class_id}, цвет={color_str}")
+            self.class_color = QColor(color_str)
+            if not self.class_color.isValid():
+                print(f"Ошибка: Невалидный цвет {color_str}, использую {self.get_default_color_str()}")
+                self.class_color = self.get_default_color()
+
+        self.update_appearance()
+
+    def update_appearance(self):
+        """
+        Обновляет внешний вид объекта согласно выбранному классу.
+        (Updates the object's appearance based on the chosen class.)
+        """
+        if self.class_color:
+            fill_color = QColor(self.class_color)
+            fill_color.setAlpha(self.get_default_alpha())
+            self.setPen(QPen(self.class_color, 2, Qt.SolidLine))
+            self.setBrush(fill_color)
+            print(f"Обновляю внешний вид {self.__class__.__name__}: ID класса={self.class_id}, цвет={self.class_color.name()}")
+        else:
+            default = self.get_default_color()
+            self.setPen(QPen(default, 2, Qt.SolidLine))
+            fill_color = QColor(default)
+            fill_color.setAlpha(self.get_default_alpha())
+            self.setBrush(fill_color)
+            print(f"Устанавливаю стандартный цвет {default.name()} для {self.__class__.__name__}")
+
+
 class ImageRectMixin:
     """Миксин для получения прямоугольника изображения"""
     def get_image_rect(self):
@@ -66,7 +130,7 @@ class ImageRectMixin:
         return None
 
 
-class SelectableRectItem(ImageRectMixin, QGraphicsRectItem):
+class SelectableRectItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsRectItem):
     """Класс для создания выделяемых и редактируемых прямоугольников"""
     
     # Константы для идентификации маркеров изменения размера
@@ -105,49 +169,6 @@ class SelectableRectItem(ImageRectMixin, QGraphicsRectItem):
         self.class_id = None
         self.class_name = None
         self.class_color = None
-    
-    def set_class(self, class_data):
-        """Устанавливает класс сегментации для объекта"""
-        if class_data is None:
-            self.class_id = None
-            self.class_name = None
-            self.class_color = QColor(255, 0, 0)  # Красный по умолчанию
-            print("Устанавливаю None класс для прямоугольника")
-        else:
-            self.class_id = class_data.get('id')
-            self.class_name = class_data.get('name')
-            
-            # Получаем цвет из строки вида "#RRGGBB"
-            color_str = class_data.get('color', '#FF0000')
-            print(f"Устанавливаю класс для прямоугольника: {self.class_name}, ID={self.class_id}, цвет={color_str}")
-            self.class_color = QColor(color_str)
-            
-            # Проверка правильности преобразования цвета
-            if not self.class_color.isValid():
-                print(f"Ошибка: Невалидный цвет {color_str}, использую красный")
-                self.class_color = QColor(255, 0, 0)
-        
-        # Обновляем внешний вид
-        self.update_appearance()
-    
-    def update_appearance(self):
-        """Обновляет внешний вид объекта согласно выбранному классу"""
-        if self.class_color:
-            # Создаем полупрозрачный цвет для заливки
-            fill_color = QColor(self.class_color)
-            fill_color.setAlpha(50)  # 20% непрозрачность
-            
-            # Устанавливаем цвет контура и заливки
-            self.setPen(QPen(self.class_color, 2, Qt.SolidLine))
-            self.setBrush(fill_color)
-            
-            # Отладочная информация
-            print(f"Обновляю внешний вид прямоугольника: ID класса={self.class_id}, цвет={self.class_color.name()}")
-        else:
-            # Стандартный красный цвет, если класс не выбран
-            self.setPen(QPen(QColor(255, 0, 0), 2, Qt.SolidLine))
-            self.setBrush(QColor(255, 0, 0, 50))
-            print("Устанавливаю стандартный красный цвет для прямоугольника")
     
     def constrain_rect_to_image(self, rect):
         """Ограничивает прямоугольник границами изображения"""
@@ -369,7 +390,7 @@ class SelectableRectItem(ImageRectMixin, QGraphicsRectItem):
             painter.drawRect(QRectF(rect.right() - handle_size/2, rect.center().y() - handle_size/2, handle_size, handle_size))
 
 
-class SelectablePolygonItem(ImageRectMixin, QGraphicsPolygonItem):
+class SelectablePolygonItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsPolygonItem):
     """Класс для создания выделяемых и редактируемых полигонов"""
     
     def __init__(self, points=None, parent=None, scene=None):
@@ -407,49 +428,6 @@ class SelectablePolygonItem(ImageRectMixin, QGraphicsPolygonItem):
         
         # Установка обработки наведения мыши
         self.setAcceptHoverEvents(True)
-    
-    def set_class(self, class_data):
-        """Устанавливает класс сегментации для объекта"""
-        if class_data is None:
-            self.class_id = None
-            self.class_name = None
-            self.class_color = QColor(0, 255, 0)  # Зеленый по умолчанию для полигонов
-            print("Устанавливаю None класс для полигона")
-        else:
-            self.class_id = class_data.get('id')
-            self.class_name = class_data.get('name')
-            
-            # Получаем цвет из строки вида "#RRGGBB"
-            color_str = class_data.get('color', '#00FF00')
-            print(f"Устанавливаю класс для полигона: {self.class_name}, ID={self.class_id}, цвет={color_str}")
-            self.class_color = QColor(color_str)
-            
-            # Проверка правильности преобразования цвета
-            if not self.class_color.isValid():
-                print(f"Ошибка: Невалидный цвет {color_str}, использую зеленый")
-                self.class_color = QColor(0, 255, 0)
-        
-        # Обновляем внешний вид
-        self.update_appearance()
-    
-    def update_appearance(self):
-        """Обновляет внешний вид объекта согласно выбранному классу"""
-        if self.class_color:
-            # Создаем полупрозрачный цвет для заливки
-            fill_color = QColor(self.class_color)
-            fill_color.setAlpha(50)  # 20% непрозрачность
-            
-            # Устанавливаем цвет контура и заливки
-            self.setPen(QPen(self.class_color, 2, Qt.SolidLine))
-            self.setBrush(fill_color)
-            
-            # Отладочная информация
-            print(f"Обновляю внешний вид полигона: ID класса={self.class_id}, цвет={self.class_color.name()}")
-        else:
-            # Стандартный зеленый цвет, если класс не выбран
-            self.setPen(QPen(QColor(0, 255, 0), 2, Qt.SolidLine))
-            self.setBrush(QColor(0, 255, 0, 50))
-            print("Устанавливаю стандартный зеленый цвет для полигона")
     
     def constrain_point_to_image(self, point):
         """Ограничивает точку границами изображения"""
