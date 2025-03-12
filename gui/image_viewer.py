@@ -39,8 +39,34 @@ class PinchableGraphicsView(QGraphicsView):
             return True
         return False
 
+class ImageRectMixin:
+    """Миксин для получения прямоугольника изображения"""
+    def get_image_rect(self):
+        # Пытаемся получить pixmap_item из нескольких источников
+        if self.scene and hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
+            return self.scene.pixmap_item.boundingRect()
 
-class SelectableRectItem(QGraphicsRectItem):
+        if self.scene and hasattr(self.scene, 'scene') and self.scene.scene:
+            scene = self.scene.scene
+            if hasattr(scene, 'pixmap_item') and scene.pixmap_item:
+                return scene.pixmap_item.boundingRect()
+
+        # Если self.scene является callable (например, функция) или QGraphicsScene
+        try:
+            scene = self.scene()
+            if hasattr(scene, 'pixmap_item') and scene.pixmap_item:
+                return scene.pixmap_item.boundingRect()
+        except Exception:
+            pass
+
+        # Последняя проверка, если self.scene сам содержит pixmap_item
+        if hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
+            return self.scene.pixmap_item.boundingRect()
+
+        return None
+
+
+class SelectableRectItem(ImageRectMixin, QGraphicsRectItem):
     """Класс для создания выделяемых и редактируемых прямоугольников"""
     
     # Константы для идентификации маркеров изменения размера
@@ -122,37 +148,6 @@ class SelectableRectItem(QGraphicsRectItem):
             self.setPen(QPen(QColor(255, 0, 0), 2, Qt.SolidLine))
             self.setBrush(QColor(255, 0, 0, 50))
             print("Устанавливаю стандартный красный цвет для прямоугольника")
-    
-    def get_image_rect(self):
-        """Получить прямоугольник изображения"""
-        # Проверяем если self.scene это экземпляр ImageViewerWidget
-        if self.scene and hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
-            return self.scene.pixmap_item.boundingRect()
-        
-        # Проверяем если self.scene._scene это QGraphicsScene с pixmap_item
-        if self.scene and hasattr(self.scene, 'scene') and self.scene.scene:
-            scene = self.scene.scene
-            if hasattr(scene, 'pixmap_item') and scene.pixmap_item:
-                return scene.pixmap_item.boundingRect()
-        
-        # Если не удалось получить через scene, пробуем через сцену, к которой прикреплен элемент
-        scene = self.scene()
-        if scene:
-            # Проверяем, есть ли pixmap_item непосредственно в сцене
-            if hasattr(scene, 'pixmap_item') and scene.pixmap_item:
-                return scene.pixmap_item.boundingRect()
-            
-            # Проверяем, есть ли родительский объект с pixmap_item
-            if hasattr(scene, 'parent') and scene.parent():
-                parent = scene.parent()
-                if hasattr(parent, 'pixmap_item') and parent.pixmap_item:
-                    return parent.pixmap_item.boundingRect()
-        
-        # Последняя проверка, если self.scene это что-то другое с pixmap_item как атрибутом
-        if hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
-            return self.scene.pixmap_item.boundingRect()
-            
-        return None
     
     def constrain_rect_to_image(self, rect):
         """Ограничивает прямоугольник границами изображения"""
@@ -374,7 +369,7 @@ class SelectableRectItem(QGraphicsRectItem):
             painter.drawRect(QRectF(rect.right() - handle_size/2, rect.center().y() - handle_size/2, handle_size, handle_size))
 
 
-class SelectablePolygonItem(QGraphicsPolygonItem):
+class SelectablePolygonItem(ImageRectMixin, QGraphicsPolygonItem):
     """Класс для создания выделяемых и редактируемых полигонов"""
     
     def __init__(self, points=None, parent=None, scene=None):
@@ -455,37 +450,6 @@ class SelectablePolygonItem(QGraphicsPolygonItem):
             self.setPen(QPen(QColor(0, 255, 0), 2, Qt.SolidLine))
             self.setBrush(QColor(0, 255, 0, 50))
             print("Устанавливаю стандартный зеленый цвет для полигона")
-    
-    def get_image_rect(self):
-        """Получить прямоугольник изображения"""
-        # Проверяем если self.scene это экземпляр ImageViewerWidget
-        if self.scene and hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
-            return self.scene.pixmap_item.boundingRect()
-        
-        # Проверяем если self.scene._scene это QGraphicsScene с pixmap_item
-        if self.scene and hasattr(self.scene, 'scene') and self.scene.scene:
-            scene = self.scene.scene
-            if hasattr(scene, 'pixmap_item') and scene.pixmap_item:
-                return scene.pixmap_item.boundingRect()
-        
-        # Если не удалось получить через scene, пробуем через сцену, к которой прикреплен элемент
-        scene = self.scene()
-        if scene:
-            # Проверяем, есть ли pixmap_item непосредственно в сцене
-            if hasattr(scene, 'pixmap_item') and scene.pixmap_item:
-                return scene.pixmap_item.boundingRect()
-            
-            # Проверяем, есть ли родительский объект с pixmap_item
-            if hasattr(scene, 'parent') and scene.parent():
-                parent = scene.parent()
-                if hasattr(parent, 'pixmap_item') and parent.pixmap_item:
-                    return parent.pixmap_item.boundingRect()
-        
-        # Последняя проверка, если self.scene это что-то другое с pixmap_item как атрибутом
-        if hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
-            return self.scene.pixmap_item.boundingRect()
-            
-        return None
     
     def constrain_point_to_image(self, point):
         """Ограничивает точку границами изображения"""
@@ -769,13 +733,13 @@ class ImageViewerWidget(QWidget):
         self.toolbar.addSeparator()
         
         # Добавляем действия для экспорта/импорта аннотаций
-        self.action_export_annotations = QAction("Экспорт аннотаций", self)
-        self.action_export_annotations.triggered.connect(self.show_export_annotations_dialog)
-        self.toolbar.addAction(self.action_export_annotations)
+        # self.action_export_annotations = QAction("Экспорт аннотаций", self)
+        # self.action_export_annotations.triggered.connect(self.show_export_annotations_dialog)
+        # self.toolbar.addAction(self.action_export_annotations)
         
-        self.action_import_annotations = QAction("Импорт аннотаций", self)
-        self.action_import_annotations.triggered.connect(self.show_import_annotations_dialog)
-        self.toolbar.addAction(self.action_import_annotations)
+        # self.action_import_annotations = QAction("Импорт аннотаций", self)
+        # self.action_import_annotations.triggered.connect(self.show_import_annotations_dialog)
+        # self.toolbar.addAction(self.action_import_annotations)
         
         # Устанавливаем политику размера для панели инструментов
         self.toolbar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
