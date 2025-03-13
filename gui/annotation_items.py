@@ -420,6 +420,8 @@ class SelectablePolygonItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsPoly
         self.current_point_index = None
         self.mouse_press_pos = None
         self.scene = scene
+        self.scene_obj = None  # Ссылка на объект QGraphicsScene
+        self.hover_edge_index = None  # Индекс ребра, над которым находится курсор
         
         # Свойства для класса сегментации
         self.class_id = None
@@ -517,6 +519,27 @@ class SelectablePolygonItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsPoly
                     self.handle_size
                 )
                 painter.drawRect(handle_rect)
+            
+            # Если курсор находится над ребром, отрисовываем точку возможного добавления
+            if self.hover_edge_index is not None:
+                painter.setPen(QPen(QColor(255, 165, 0), 1))  # Оранжевый цвет
+                painter.setBrush(QColor(255, 165, 0, 200))
+                
+                # Получаем координаты середины ребра
+                i1 = self.hover_edge_index
+                i2 = (i1 + 1) % polygon.count()
+                p1 = polygon.at(i1)
+                p2 = polygon.at(i2)
+                mid_point = QPointF((p1.x() + p2.x()) / 2, (p1.y() + p2.y()) / 2)
+                
+                # Рисуем маркер в середине ребра
+                handle_rect = QRectF(
+                    mid_point.x() - self.handle_size/2,
+                    mid_point.y() - self.handle_size/2,
+                    self.handle_size,
+                    self.handle_size
+                )
+                painter.drawRect(handle_rect)
     
     def point_at_position(self, pos):
         """Определяет, находится ли указанная позиция над одной из точек полигона
@@ -540,6 +563,98 @@ class SelectablePolygonItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsPoly
                 return i
         return None
     
+    def edge_at_position(self, pos):
+        """Определяет, находится ли указанная позиция над одним из ребер полигона
+        
+        Args:
+            pos: Позиция проверки (QPointF)
+            
+        Returns:
+            int: Индекс начальной точки ребра или None, если ребро не найдено
+        """
+        polygon = self.polygon()
+        if polygon.count() < 2:
+            return None
+            
+        # Проверяем каждое ребро полигона
+        for i in range(polygon.count()):
+            p1 = polygon.at(i)
+            p2 = polygon.at((i + 1) % polygon.count())
+            
+            # Вычисляем середину ребра
+            mid_point = QPointF((p1.x() + p2.x()) / 2, (p1.y() + p2.y()) / 2)
+            
+            # Проверяем, находится ли курсор рядом с серединой ребра
+            handle_rect = QRectF(
+                mid_point.x() - self.handle_size/2,
+                mid_point.y() - self.handle_size/2,
+                self.handle_size,
+                self.handle_size
+            )
+            
+            if handle_rect.contains(pos):
+                return i
+                
+        return None
+    
+    def add_point_at_edge(self, edge_index):
+        """Добавляет новую точку в середину указанного ребра
+        
+        Args:
+            edge_index: Индекс начальной точки ребра
+        """
+        polygon = self.polygon()
+        if polygon.count() < 2 or edge_index is None:
+            return
+            
+        # Получаем координаты точек ребра
+        i1 = edge_index
+        i2 = (edge_index + 1) % polygon.count()
+        p1 = polygon.at(i1)
+        p2 = polygon.at(i2)
+        
+        # Вычисляем середину ребра
+        mid_point = QPointF((p1.x() + p2.x()) / 2, (p1.y() + p2.y()) / 2)
+        
+        # Создаем новый полигон с добавленной точкой
+        new_polygon = QPolygonF()
+        for i in range(polygon.count()):
+            new_polygon.append(polygon.at(i))
+            if i == edge_index:
+                # Вставляем новую точку после текущей
+                new_polygon.append(mid_point)
+        
+        # Обновляем полигон
+        self.setPolygon(new_polygon)
+        
+        # Уведомляем об изменении
+        if hasattr(self, 'scene') and self.scene and hasattr(self.scene, 'on_annotation_changed'):
+            self.scene.on_annotation_changed()
+    
+    def remove_point(self, point_index):
+        """Удаляет точку из полигона
+        
+        Args:
+            point_index: Индекс точки для удаления
+        """
+        polygon = self.polygon()
+        if polygon.count() <= 3 or point_index is None:
+            # Не удаляем точку, если полигон станет слишком маленьким
+            return
+            
+        # Создаем новый полигон без указанной точки
+        new_polygon = QPolygonF()
+        for i in range(polygon.count()):
+            if i != point_index:
+                new_polygon.append(polygon.at(i))
+        
+        # Обновляем полигон
+        self.setPolygon(new_polygon)
+        
+        # Уведомляем об изменении
+        if hasattr(self, 'scene') and self.scene and hasattr(self.scene, 'on_annotation_changed'):
+            self.scene.on_annotation_changed()
+    
     def mousePressEvent(self, event):
         """Обработка нажатия мыши на полигоне"""
         if event.button() == Qt.LeftButton:
@@ -549,6 +664,21 @@ class SelectablePolygonItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsPoly
             if point_index is not None and self.isSelected():
                 self.current_point_index = point_index
                 self.mouse_press_pos = pos
+                event.accept()
+                return
+                
+            # Проверяем, нажата ли середина ребра для добавления новой точки
+            edge_index = self.edge_at_position(pos)
+            if edge_index is not None and self.isSelected():
+                self.add_point_at_edge(edge_index)
+                event.accept()
+                return
+        elif event.button() == Qt.RightButton:
+            pos = event.pos()
+            # Проверяем, нажата ли одна из точек полигона для удаления
+            point_index = self.point_at_position(pos)
+            if point_index is not None and self.isSelected():
+                self.remove_point(point_index)
                 event.accept()
                 return
         
@@ -596,15 +726,38 @@ class SelectablePolygonItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsPoly
         
     def hoverMoveEvent(self, event):
         """Обработка перемещения мыши над полигоном"""
-        # Изменяем курсор, если мышь находится над точкой полигона
-        if self.isSelected() and self.point_at_position(event.pos()) is not None:
-            self.setCursor(Qt.PointingHandCursor)
+        if self.isSelected():
+            pos = event.pos()
+            
+            # Проверяем, находится ли курсор над точкой полигона
+            point_index = self.point_at_position(pos)
+            if point_index is not None:
+                self.setCursor(Qt.PointingHandCursor)
+                self.hover_edge_index = None
+                self.update()  # Перерисовываем для обновления отображения
+                return
+                
+            # Проверяем, находится ли курсор над ребром полигона
+            edge_index = self.edge_at_position(pos)
+            if edge_index is not None:
+                self.setCursor(Qt.CrossCursor)  # Курсор для добавления точки
+                self.hover_edge_index = edge_index
+                self.update()  # Перерисовываем для обновления отображения
+                return
+                
+            # Если курсор не над точкой и не над ребром
+            self.setCursor(Qt.ArrowCursor)
+            self.hover_edge_index = None
+            self.update()  # Перерисовываем для обновления отображения
         else:
             self.setCursor(Qt.ArrowCursor)
+            self.hover_edge_index = None
         
         super().hoverMoveEvent(event)
     
     def hoverLeaveEvent(self, event):
         """Обработка выхода мыши за пределы полигона"""
         self.setCursor(Qt.ArrowCursor)
+        self.hover_edge_index = None
+        self.update()  # Перерисовываем для обновления отображения
         super().hoverLeaveEvent(event)

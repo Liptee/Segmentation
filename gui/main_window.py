@@ -65,14 +65,14 @@ class MainWindow(QMainWindow):
         left_splitter.addWidget(self.media_importer)
         
         # Устанавливаем начальные размеры разделителей
-        left_splitter.setSizes([600, 200])  # 3:1 соотношение для верх:низ
+        left_splitter.setSizes([500, 300])  # 5:3 соотношение для верх:низ
         
         # Добавляем левую и правую панели в главный разделитель
         main_splitter.addWidget(left_widget)
         main_splitter.addWidget(self.class_manager)
         
         # Устанавливаем начальные размеры главного разделителя
-        main_splitter.setSizes([700, 500])  # Примерно 7:5 для лево:право
+        main_splitter.setSizes([800, 400])  # Примерно 8:4 для лево:право
         
         # Подключаем сигналы
         self.media_importer.mediaSelected.connect(self.on_media_selected)

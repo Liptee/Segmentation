@@ -1,5 +1,3 @@
-import json
-import os
 import cv2
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSlider, QLabel,
@@ -19,7 +17,6 @@ from gui.geometry_utils import GeometryUtils
 from core.annotation_manager import AnnotationManager
 from gui.annotation_items import SelectableRectItem, SelectablePolygonItem
 from logger import logger
-
 
 
 """
@@ -770,6 +767,22 @@ class ImageViewerWidget(QWidget):
             self.view.fit_in_view()
             # Обновляем zoom_factor на основе текущего масштаба
             self.zoom_factor = self.view._current_scale
+            return
+            
+        # Показываем справку по редактированию полигонов при нажатии клавиши H
+        if self.current_mode == self.MODE_EDIT and event.key() == Qt.Key_H:
+            from PyQt5.QtWidgets import QMessageBox
+            help_text = """
+            <b>Редактирование полигонов:</b>
+            <ul>
+            <li>Перетаскивание точек: Выберите и перетащите точку полигона для изменения формы</li>
+            <li>Добавление точки: Щелкните левой кнопкой мыши на середине ребра полигона</li>
+            <li>Удаление точки: Щелкните правой кнопкой мыши на существующей точке полигона</li>
+            <li>Выбор класса: Дважды щелкните на полигоне или нажмите клавишу C</li>
+            <li>Удаление полигона: Выберите полигон и нажмите Delete или Backspace</li>
+            </ul>
+            """
+            QMessageBox.information(self, "Справка по редактированию полигонов", help_text)
             return
             
         super().keyPressEvent(event)

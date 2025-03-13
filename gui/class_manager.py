@@ -185,15 +185,15 @@ class SegmentationClassManagerWidget(QWidget):
         self.classListWidget.itemDoubleClicked.connect(self.editClass)
 
         btnLayout = QHBoxLayout()
-        self.addButton = QPushButton("Добавить класс")
+        self.addButton = QPushButton("+")
         self.addButton.clicked.connect(self.openAddClassDialog)
         btnLayout.addWidget(self.addButton)
 
-        self.removeButton = QPushButton("Удалить выбранный")
+        self.removeButton = QPushButton("-")
         self.removeButton.clicked.connect(self.removeSelected)
         btnLayout.addWidget(self.removeButton)
 
-        self.mergeButton = QPushButton("Объединить выбранные")
+        self.mergeButton = QPushButton("Объединить")
         self.mergeButton.clicked.connect(self.mergeSelected)
         btnLayout.addWidget(self.mergeButton)
 
