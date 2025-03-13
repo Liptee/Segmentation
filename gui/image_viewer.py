@@ -389,6 +389,8 @@ class ImageViewerWidget(QWidget):
                     item.setFlag(QGraphicsItem.ItemIsMovable, True)
                     # Устанавливаем ссылку на сцену для каждого элемента
                     item.scene = self
+                    # Устанавливаем флаг для обработки изменений геометрии
+                    item.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
             
         # Сбрасываем текущее выделение
         if self.current_rect:
@@ -556,6 +558,8 @@ class ImageViewerWidget(QWidget):
                 
                 # Создаем постоянный прямоугольник
                 rect_item = SelectableRectItem(rect.x(), rect.y(), rect.width(), rect.height(), None, self)
+                # Устанавливаем флаг для обработки изменений геометрии
+                rect_item.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
                 # В режиме выделения прямоугольники не должны быть интерактивными
                 rect_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
                 rect_item.setFlag(QGraphicsItem.ItemIsMovable, False)
@@ -593,6 +597,9 @@ class ImageViewerWidget(QWidget):
         # Используем copy() для создания копии списка точек
         # Передаем непосредственно сцену для доступа к pixmap_item
         polygon_item = SelectablePolygonItem(self.polygon_points.copy(), None, self)
+        
+        # Устанавливаем флаг для обработки изменений геометрии
+        polygon_item.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
         
         # Установим еще одну ссылку на scene как объект типа QGraphicsScene
         polygon_item.scene_obj = self.scene

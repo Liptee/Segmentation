@@ -1,6 +1,6 @@
 from PyQt5.QtGui import QColor, QPen, QPolygonF
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QGraphicsRectItem, QGraphicsPolygonItem, QGraphicsItem
+from PyQt5.QtWidgets import QGraphicsRectItem, QGraphicsPolygonItem, QGraphicsItem, QGraphicsPixmapItem
 from PyQt5.QtCore import QPointF, QRectF
 from PyQt5.QtCore import pyqtSignal, QObject
 
@@ -73,27 +73,29 @@ class ClassAnnotatableMixin:
 class ImageRectMixin:
     """Миксин для получения прямоугольника изображения"""
     def get_image_rect(self):
-        # Пытаемся получить pixmap_item из нескольких источников
-        if self.scene and hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
-            return self.scene.pixmap_item.boundingRect()
-
-        if self.scene and hasattr(self.scene, 'scene') and self.scene.scene:
-            scene = self.scene.scene
-            if hasattr(scene, 'pixmap_item') and scene.pixmap_item:
-                return scene.pixmap_item.boundingRect()
-
-        # Если self.scene является callable (например, функция) или QGraphicsScene
-        try:
-            scene = self.scene()
-            if hasattr(scene, 'pixmap_item') and scene.pixmap_item:
-                return scene.pixmap_item.boundingRect()
-        except Exception:
-            pass
-
-        # Последняя проверка, если self.scene сам содержит pixmap_item
-        if hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
-            return self.scene.pixmap_item.boundingRect()
-
+        # Проверяем, есть ли у нас прямой доступ к pixmap_item через self.scene
+        if hasattr(self, 'scene'):
+            # Если self.scene - это ImageViewerWidget
+            if hasattr(self.scene, 'pixmap_item') and self.scene.pixmap_item:
+                return self.scene.pixmap_item.boundingRect()
+            
+            # Если self.scene - это QGraphicsScene
+            if hasattr(self.scene, 'parent') and self.scene.parent and hasattr(self.scene.parent, 'pixmap_item'):
+                return self.scene.parent.pixmap_item.boundingRect()
+        
+        # Пытаемся получить сцену через QGraphicsItem.scene()
+        scene = self.scene()
+        if scene:
+            # Проверяем, есть ли у сцены родитель с pixmap_item
+            if hasattr(scene, 'parent') and scene.parent and hasattr(scene.parent, 'pixmap_item'):
+                return scene.parent.pixmap_item.boundingRect()
+            
+            # Проверяем, есть ли у сцены pixmap_item напрямую
+            for item in scene.items():
+                if isinstance(item, QGraphicsPixmapItem):
+                    return item.boundingRect()
+        
+        # Если ничего не нашли, возвращаем None
         return None
 
 
@@ -169,7 +171,7 @@ class SelectableRectItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsRectIte
     def itemChange(self, change, value):
         """Обработка изменений элемента"""
         # Когда меняется позиция прямоугольника, проверяем, не выходит ли он за границы изображения
-        if change == QGraphicsItem.ItemPositionChange and self.scene:
+        if change == QGraphicsItem.ItemPositionChange:
             new_pos = value
             image_rect = self.get_image_rect()
             
@@ -189,6 +191,12 @@ class SelectableRectItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsRectIte
                     new_pos.setY(image_rect.bottom() - rect.bottom())
                 
                 return new_pos
+        
+        # Когда позиция прямоугольника изменилась, уведомляем об этом
+        elif change == QGraphicsItem.ItemPositionHasChanged:
+            # Уведомляем об изменении положения прямоугольника
+            if hasattr(self, 'scene') and self.scene and hasattr(self.scene, 'on_annotation_changed'):
+                self.scene.on_annotation_changed()
         
         return super().itemChange(change, value)
     
@@ -430,9 +438,12 @@ class SelectablePolygonItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsPoly
         # чтобы маркеры точек были отрисованы в правильных позициях
         if change == QGraphicsItem.ItemPositionHasChanged:
             self.update()
+            # Уведомляем об изменении положения полигона
+            if hasattr(self, 'scene') and self.scene and hasattr(self.scene, 'on_annotation_changed'):
+                self.scene.on_annotation_changed()
         
         # Когда меняется позиция полигона, проверяем, не выходит ли он за границы изображения
-        elif change == QGraphicsItem.ItemPositionChange and self.scene:
+        elif change == QGraphicsItem.ItemPositionChange:
             new_pos = value
             image_rect = self.get_image_rect()
             
@@ -441,11 +452,13 @@ class SelectablePolygonItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsPoly
                 polygon_rect = self.boundingRect()
                 
                 # Проверяем, не выходит ли полигон за границы изображения
+                # Ограничиваем перемещение по X
                 if new_pos.x() + polygon_rect.left() < image_rect.left():
                     new_pos.setX(image_rect.left() - polygon_rect.left())
                 elif new_pos.x() + polygon_rect.right() > image_rect.right():
                     new_pos.setX(image_rect.right() - polygon_rect.right())
                 
+                # Ограничиваем перемещение по Y
                 if new_pos.y() + polygon_rect.top() < image_rect.top():
                     new_pos.setY(image_rect.top() - polygon_rect.top())
                 elif new_pos.y() + polygon_rect.bottom() > image_rect.bottom():
