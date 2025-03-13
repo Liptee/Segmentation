@@ -2,6 +2,7 @@ import json
 import os
 from PyQt5.QtCore import QRectF, QPointF
 from gui.annotation_items import SelectableRectItem, SelectablePolygonItem  # Импортируйте нужные классы
+from logger import logger
 
 class AnnotationManager:
     def __init__(self):
@@ -9,11 +10,19 @@ class AnnotationManager:
         self.annotations_by_image = {}
 
     def save_annotations(self, current_image_path, annotations, normalize_rect, normalize_points):
+        logger.info(f"AnnotationManager.save_annotations: Сохраняю {len(annotations)} аннотаций для {current_image_path}")
+        
         normalized_annotations = []
-        for annotation in annotations:
+        for i, annotation in enumerate(annotations):
             if isinstance(annotation, SelectableRectItem):
                 rect = annotation.rect()
+                pos = annotation.pos()
+                logger.info(f"  Аннотация {i}: Прямоугольник, позиция: {pos}, размер: {rect.size()}")
+                
+                # Получаем нормализованные координаты
                 norm_rect = normalize_rect(rect)
+                logger.info(f"    Нормализованный прямоугольник: {norm_rect}")
+                
                 class_data = {
                     'id': annotation.class_id,
                     'name': annotation.class_name,
@@ -27,11 +36,21 @@ class AnnotationManager:
                         'width': norm_rect.width(),
                         'height': norm_rect.height()
                     },
+                    'position': {
+                        'x': pos.x(),
+                        'y': pos.y()
+                    },
                     'class': class_data
                 })
             elif isinstance(annotation, SelectablePolygonItem):
+                pos = annotation.pos()
                 points = [annotation.polygon().at(i) for i in range(annotation.polygon().count())]
+                logger.info(f"  Аннотация {i}: Полигон, позиция: {pos}, точек: {len(points)}")
+                
+                # Получаем нормализованные точки
                 norm_points = normalize_points(points)
+                logger.info(f"    Первая нормализованная точка: {norm_points[0] if norm_points else 'нет точек'}")
+                
                 norm_points_data = [{'x': p.x(), 'y': p.y()} for p in norm_points]
                 class_data = {
                     'id': annotation.class_id,
@@ -41,32 +60,65 @@ class AnnotationManager:
                 normalized_annotations.append({
                     'type': 'polygon',
                     'points': norm_points_data,
+                    'position': {
+                        'x': pos.x(),
+                        'y': pos.y()
+                    },
                     'class': class_data
                 })
+        
+        # Сохраняем нормализованные аннотации
         self.annotations_by_image[current_image_path] = normalized_annotations
+        logger.info(f"AnnotationManager.save_annotations: Сохранено {len(normalized_annotations)} аннотаций")
 
     def load_annotations(self, image_path, denormalize_rect, denormalize_points):
         if image_path not in self.annotations_by_image:
             return []
+        
+        logger.info(f"AnnotationManager.load_annotations: Загружаю аннотации для {image_path}")
         normalized_annotations = self.annotations_by_image[image_path]
         loaded_items = []
-        for data in normalized_annotations:
+        
+        for i, data in enumerate(normalized_annotations):
             if data['type'] == 'rect':
                 coords = data['coords']
                 norm_rect = QRectF(coords['x'], coords['y'], coords['width'], coords['height'])
                 rect = denormalize_rect(norm_rect)
+                
+                # Создаем прямоугольник
                 rect_item = SelectableRectItem(rect.x(), rect.y(), rect.width(), rect.height(), None, None)
+                
+                # Устанавливаем позицию, если она есть
+                if 'position' in data:
+                    pos = data['position']
+                    rect_item.setPos(pos['x'], pos['y'])
+                    logger.info(f"  Загружена аннотация {i}: Прямоугольник, установлена позиция: {pos['x']}, {pos['y']}")
+                
                 if data.get('class'):
                     rect_item.set_class(data['class'])
+                
                 loaded_items.append(rect_item)
+                
             elif data['type'] == 'polygon':
                 norm_points_data = data['points']
                 norm_points = [QPointF(p['x'], p['y']) for p in norm_points_data]
                 points = denormalize_points(norm_points)
+                
+                # Создаем полигон
                 polygon_item = SelectablePolygonItem(points, None, None)
+                
+                # Устанавливаем позицию, если она есть
+                if 'position' in data:
+                    pos = data['position']
+                    polygon_item.setPos(pos['x'], pos['y'])
+                    logger.info(f"  Загружена аннотация {i}: Полигон, установлена позиция: {pos['x']}, {pos['y']}")
+                
                 if data.get('class'):
                     polygon_item.set_class(data['class'])
+                
                 loaded_items.append(polygon_item)
+        
+        logger.info(f"AnnotationManager.load_annotations: Загружено {len(loaded_items)} аннотаций")
         return loaded_items
 
     def export_to_json(self, output_file):

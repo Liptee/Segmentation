@@ -739,18 +739,32 @@ class ImageViewerWidget(QWidget):
         Сохраняет текущие аннотации для текущего изображения
         """
         if not self.current_image_path:
+            logger.warning("ImageViewer.save_current_annotations: Нет текущего пути к изображению")
             return
+        
+        logger.info(f"ImageViewer.save_current_annotations: Сохраняю {len(self.annotations)} аннотаций для {self.current_image_path}")
+        
+        # Выводим информацию о каждой аннотации перед сохранением
+        for i, annotation in enumerate(self.annotations):
+            if isinstance(annotation, SelectableRectItem):
+                logger.info(f"  Сохраняю аннотацию {i}: Прямоугольник, позиция: {annotation.pos()}, размер: {annotation.rect().size()}")
+            elif isinstance(annotation, SelectablePolygonItem):
+                logger.info(f"  Сохраняю аннотацию {i}: Полигон, позиция: {annotation.pos()}, точек: {annotation.polygon().count()}")
         
         self.annotation_manager.save_annotations(
             self.current_image_path, 
             self.annotations, 
             self.normalize_rect_coords, 
             self.normalize_polygon_points)
+        
+        logger.info(f"ImageViewer.save_current_annotations: Аннотации сохранены")
 
     def load_annotations_for_image(self, image_path):
         """
         Загружает и отображает аннотации для указанного изображения
         """
+        logger.info(f"ImageViewer.load_annotations_for_image: Загружаю аннотации для {image_path}")
+        
         # Очищаем текущие аннотации
         for annotation in self.annotations:
             self.scene.removeItem(annotation)
@@ -758,6 +772,7 @@ class ImageViewerWidget(QWidget):
         
         # Если нет сохраненных аннотаций для этого изображения, выходим
         if image_path not in self.annotation_manager.annotations_by_image:
+            logger.info(f"ImageViewer.load_annotations_for_image: Нет сохраненных аннотаций для {image_path}")
             return
             
         loaded_items = self.annotation_manager.load_annotations(
@@ -765,7 +780,19 @@ class ImageViewerWidget(QWidget):
             self.denormalize_rect_coords, 
             self.denormalize_polygon_points)
         
-        for item in loaded_items:
+        logger.info(f"ImageViewer.load_annotations_for_image: Загружено {len(loaded_items)} аннотаций")
+        
+        for i, item in enumerate(loaded_items):
+            if isinstance(item, SelectableRectItem):
+                logger.info(f"  Загружена аннотация {i}: Прямоугольник, позиция: {item.pos()}, размер: {item.rect().size()}")
+            elif isinstance(item, SelectablePolygonItem):
+                logger.info(f"  Загружена аннотация {i}: Полигон, позиция: {item.pos()}, точек: {item.polygon().count()}")
+            
+            # Устанавливаем ссылку на сцену для каждого элемента
+            item.scene = self
+            # Устанавливаем флаг для обработки изменений геометрии
+            item.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+            
             self.scene.addItem(item)
             self.annotations.append(item)
 
@@ -789,6 +816,16 @@ class ImageViewerWidget(QWidget):
     def on_annotation_changed(self):
         """Обработчик изменения аннотаций в режиме редактирования"""
         # Сохраняем текущие аннотации при их изменении
+        logger.info(f"ImageViewer.on_annotation_changed: Сохраняю аннотации для {self.current_image_path}")
+        logger.info(f"ImageViewer.on_annotation_changed: Количество аннотаций: {len(self.annotations)}")
+        
+        # Выводим информацию о каждой аннотации
+        for i, annotation in enumerate(self.annotations):
+            if isinstance(annotation, SelectableRectItem):
+                logger.info(f"  Аннотация {i}: Прямоугольник, позиция: {annotation.pos()}, размер: {annotation.rect().size()}")
+            elif isinstance(annotation, SelectablePolygonItem):
+                logger.info(f"  Аннотация {i}: Полигон, позиция: {annotation.pos()}, точек: {annotation.polygon().count()}")
+        
         self.save_current_annotations()
         logger.info(f"ImageViewer: Аннотации изменены и сохранены для {self.current_image_path}")
 

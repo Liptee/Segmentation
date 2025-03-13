@@ -84,16 +84,19 @@ class ImageRectMixin:
                 return self.scene.parent.pixmap_item.boundingRect()
         
         # Пытаемся получить сцену через QGraphicsItem.scene()
-        scene = self.scene()
-        if scene:
-            # Проверяем, есть ли у сцены родитель с pixmap_item
-            if hasattr(scene, 'parent') and scene.parent and hasattr(scene.parent, 'pixmap_item'):
-                return scene.parent.pixmap_item.boundingRect()
-            
-            # Проверяем, есть ли у сцены pixmap_item напрямую
-            for item in scene.items():
-                if isinstance(item, QGraphicsPixmapItem):
-                    return item.boundingRect()
+        try:
+            scene = super().scene()  # Используем метод scene() из QGraphicsItem
+            if scene:
+                # Проверяем, есть ли у сцены родитель с pixmap_item
+                if hasattr(scene, 'parent') and scene.parent and hasattr(scene.parent, 'pixmap_item'):
+                    return scene.parent.pixmap_item.boundingRect()
+                
+                # Проверяем, есть ли у сцены pixmap_item напрямую
+                for item in scene.items():
+                    if isinstance(item, QGraphicsPixmapItem):
+                        return item.boundingRect()
+        except Exception as e:
+            logger.warning(f"Ошибка при получении сцены: {e}")
         
         # Если ничего не нашли, возвращаем None
         return None
@@ -172,31 +175,42 @@ class SelectableRectItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsRectIte
         """Обработка изменений элемента"""
         # Когда меняется позиция прямоугольника, проверяем, не выходит ли он за границы изображения
         if change == QGraphicsItem.ItemPositionChange:
-            new_pos = value
-            image_rect = self.get_image_rect()
-            
-            if image_rect:
-                # Получаем границы прямоугольника
-                rect = self.rect()
+            try:
+                new_pos = value
+                image_rect = self.get_image_rect()
                 
-                # Проверяем, не выходит ли прямоугольник за границы изображения
-                if new_pos.x() + rect.left() < image_rect.left():
-                    new_pos.setX(image_rect.left() - rect.left())
-                elif new_pos.x() + rect.right() > image_rect.right():
-                    new_pos.setX(image_rect.right() - rect.right())
-                
-                if new_pos.y() + rect.top() < image_rect.top():
-                    new_pos.setY(image_rect.top() - rect.top())
-                elif new_pos.y() + rect.bottom() > image_rect.bottom():
-                    new_pos.setY(image_rect.bottom() - rect.bottom())
-                
-                return new_pos
+                if image_rect:
+                    # Получаем границы прямоугольника
+                    rect = self.rect()
+                    
+                    # Проверяем, не выходит ли прямоугольник за границы изображения
+                    if new_pos.x() + rect.left() < image_rect.left():
+                        new_pos.setX(image_rect.left() - rect.left())
+                    elif new_pos.x() + rect.right() > image_rect.right():
+                        new_pos.setX(image_rect.right() - rect.right())
+                    
+                    if new_pos.y() + rect.top() < image_rect.top():
+                        new_pos.setY(image_rect.top() - rect.top())
+                    elif new_pos.y() + rect.bottom() > image_rect.bottom():
+                        new_pos.setY(image_rect.bottom() - rect.bottom())
+                    
+                    return new_pos
+            except Exception as e:
+                logger.warning(f"Ошибка при ограничении позиции прямоугольника: {e}")
+                return value
         
         # Когда позиция прямоугольника изменилась, уведомляем об этом
         elif change == QGraphicsItem.ItemPositionHasChanged:
-            # Уведомляем об изменении положения прямоугольника
-            if hasattr(self, 'scene') and self.scene and hasattr(self.scene, 'on_annotation_changed'):
-                self.scene.on_annotation_changed()
+            try:
+                # Уведомляем об изменении положения прямоугольника
+                logger.info(f"SelectableRectItem: Позиция изменилась на {self.pos()}")
+                if hasattr(self, 'scene') and self.scene and hasattr(self.scene, 'on_annotation_changed'):
+                    logger.info(f"SelectableRectItem: Вызываем on_annotation_changed")
+                    self.scene.on_annotation_changed()
+                else:
+                    logger.warning(f"SelectableRectItem: Не удалось вызвать on_annotation_changed: scene={hasattr(self, 'scene')}, has_method={hasattr(self.scene, 'on_annotation_changed') if hasattr(self, 'scene') else False}")
+            except Exception as e:
+                logger.warning(f"Ошибка при обработке изменения позиции прямоугольника: {e}")
         
         return super().itemChange(change, value)
     
@@ -297,7 +311,8 @@ class SelectableRectItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsRectIte
             self.mouse_press_pos = None
             self.mouse_press_rect = None
             # Вместо сигнала используем метод scene для уведомления об изменениях
-            if self.scene and hasattr(self.scene, 'on_annotation_changed'):
+            if hasattr(self, 'scene') and self.scene and hasattr(self.scene, 'on_annotation_changed'):
+                logger.info(f"SelectableRectItem.mouseReleaseEvent: Вызываем on_annotation_changed")
                 self.scene.on_annotation_changed()
             event.accept()
             return
@@ -305,7 +320,8 @@ class SelectableRectItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsRectIte
         # Если перемещали весь прямоугольник, тоже уведомляем об изменениях
         if event.button() == Qt.LeftButton and self.isSelected():
             # Вместо сигнала используем метод scene для уведомления об изменениях
-            if self.scene and hasattr(self.scene, 'on_annotation_changed'):
+            if hasattr(self, 'scene') and self.scene and hasattr(self.scene, 'on_annotation_changed'):
+                logger.info(f"SelectableRectItem.mouseReleaseEvent: Вызываем on_annotation_changed после перемещения")
                 self.scene.on_annotation_changed()
         
         super().mouseReleaseEvent(event)
@@ -437,34 +453,45 @@ class SelectablePolygonItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsPoly
         # Когда полигон перемещается, нам нужно обновить отображение,
         # чтобы маркеры точек были отрисованы в правильных позициях
         if change == QGraphicsItem.ItemPositionHasChanged:
-            self.update()
-            # Уведомляем об изменении положения полигона
-            if hasattr(self, 'scene') and self.scene and hasattr(self.scene, 'on_annotation_changed'):
-                self.scene.on_annotation_changed()
+            try:
+                self.update()
+                # Уведомляем об изменении положения полигона
+                logger.info(f"SelectablePolygonItem: Позиция изменилась на {self.pos()}")
+                if hasattr(self, 'scene') and self.scene and hasattr(self.scene, 'on_annotation_changed'):
+                    logger.info(f"SelectablePolygonItem: Вызываем on_annotation_changed")
+                    self.scene.on_annotation_changed()
+                else:
+                    logger.warning(f"SelectablePolygonItem: Не удалось вызвать on_annotation_changed: scene={hasattr(self, 'scene')}, has_method={hasattr(self.scene, 'on_annotation_changed') if hasattr(self, 'scene') else False}")
+            except Exception as e:
+                logger.warning(f"Ошибка при обработке изменения позиции полигона: {e}")
         
         # Когда меняется позиция полигона, проверяем, не выходит ли он за границы изображения
         elif change == QGraphicsItem.ItemPositionChange:
-            new_pos = value
-            image_rect = self.get_image_rect()
-            
-            if image_rect:
-                # Получаем границы полигона
-                polygon_rect = self.boundingRect()
+            try:
+                new_pos = value
+                image_rect = self.get_image_rect()
                 
-                # Проверяем, не выходит ли полигон за границы изображения
-                # Ограничиваем перемещение по X
-                if new_pos.x() + polygon_rect.left() < image_rect.left():
-                    new_pos.setX(image_rect.left() - polygon_rect.left())
-                elif new_pos.x() + polygon_rect.right() > image_rect.right():
-                    new_pos.setX(image_rect.right() - polygon_rect.right())
-                
-                # Ограничиваем перемещение по Y
-                if new_pos.y() + polygon_rect.top() < image_rect.top():
-                    new_pos.setY(image_rect.top() - polygon_rect.top())
-                elif new_pos.y() + polygon_rect.bottom() > image_rect.bottom():
-                    new_pos.setY(image_rect.bottom() - polygon_rect.bottom())
-                
-                return new_pos
+                if image_rect:
+                    # Получаем границы полигона
+                    polygon_rect = self.boundingRect()
+                    
+                    # Проверяем, не выходит ли полигон за границы изображения
+                    # Ограничиваем перемещение по X
+                    if new_pos.x() + polygon_rect.left() < image_rect.left():
+                        new_pos.setX(image_rect.left() - polygon_rect.left())
+                    elif new_pos.x() + polygon_rect.right() > image_rect.right():
+                        new_pos.setX(image_rect.right() - polygon_rect.right())
+                    
+                    # Ограничиваем перемещение по Y
+                    if new_pos.y() + polygon_rect.top() < image_rect.top():
+                        new_pos.setY(image_rect.top() - polygon_rect.top())
+                    elif new_pos.y() + polygon_rect.bottom() > image_rect.bottom():
+                        new_pos.setY(image_rect.bottom() - polygon_rect.bottom())
+                    
+                    return new_pos
+            except Exception as e:
+                logger.warning(f"Ошибка при ограничении позиции полигона: {e}")
+                return value
         
         return super().itemChange(change, value)
     
@@ -554,13 +581,15 @@ class SelectablePolygonItem(ClassAnnotatableMixin, ImageRectMixin, QGraphicsPoly
             self.current_point_index = None
             self.mouse_press_pos = None
             # Вместо сигнала используем метод scene для уведомления об изменениях
-            if self.scene and hasattr(self.scene, 'on_annotation_changed'):
+            if hasattr(self, 'scene') and self.scene and hasattr(self.scene, 'on_annotation_changed'):
+                logger.info(f"SelectablePolygonItem.mouseReleaseEvent: Вызываем on_annotation_changed")
                 self.scene.on_annotation_changed()
         
         # Если перемещали весь полигон, тоже уведомляем об изменениях
         if event.button() == Qt.LeftButton and self.isSelected():
             # Вместо сигнала используем метод scene для уведомления об изменениях
-            if self.scene and hasattr(self.scene, 'on_annotation_changed'):
+            if hasattr(self, 'scene') and self.scene and hasattr(self.scene, 'on_annotation_changed'):
+                logger.info(f"SelectablePolygonItem.mouseReleaseEvent: Вызываем on_annotation_changed после перемещения")
                 self.scene.on_annotation_changed()
         
         super().mouseReleaseEvent(event)
