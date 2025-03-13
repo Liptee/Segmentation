@@ -241,17 +241,57 @@ class MediaImporterWidget(QWidget):
         if item is None:
             return
         menu = QMenu(self)
+        
+        # Получаем объект медиа, связанный с элементом
+        media_item = item.data(Qt.UserRole)
+        
         delete_action = QAction("Удалить", self)
         delete_action.triggered.connect(lambda: self.delete_item(item))
         menu.addAction(delete_action)
+        
+        # Для видео добавляем опцию извлечения кадров
+        if media_item.media_type == "video":
+            extract_frames_action = QAction("Extract frames", self)
+            extract_frames_action.triggered.connect(lambda: self.open_video_extractor(media_item.file_path))
+            menu.addAction(extract_frames_action)
+        
         copy_action = QAction("Копировать разметку", self)
         copy_action.triggered.connect(lambda: self.copy_annotation(item))
         menu.addAction(copy_action)
+        
         if self.copied_annotation is not None:
             paste_action = QAction("Вставить разметку", self)
             paste_action.triggered.connect(lambda: self.paste_annotation(item))
             menu.addAction(paste_action)
+            
         menu.exec_(self.listWidget.mapToGlobal(pos))
+    
+    def open_video_extractor(self, video_path):
+        """Открывает диалог извлечения кадров из видео"""
+        from gui.video_extractor import VideoExtractorWidget
+        
+        # Создаем виджет извлечения кадров
+        extractor = VideoExtractorWidget(video_path)
+        extractor.setWindowTitle("Извлечение кадров из видео")
+        extractor.resize(1200, 800)
+        
+        # Подключаем сигнал извлечения кадров
+        extractor.framesExtracted.connect(self.import_extracted_frames)
+        
+        # Показываем диалог
+        extractor.show()
+    
+    def import_extracted_frames(self, frame_paths):
+        """Импортирует извлеченные кадры в режим изображений"""
+        # Переключаемся в режим изображений
+        self.switch_to_images()
+        
+        # Импортируем каждый кадр
+        for frame_path in frame_paths:
+            self.import_file(frame_path)
+            
+        # Обновляем список
+        self.refresh_list()
 
     def delete_selected_items(self):
         # Создаем копию списка выбранных элементов

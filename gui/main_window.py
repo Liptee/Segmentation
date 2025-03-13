@@ -126,4 +126,15 @@ class MainWindow(QMainWindow):
         # Импортируем изображение
         self.media_importer.import_file(frame_path)
         # Обновляем список
-        self.media_importer.refresh_list() 
+        self.media_importer.refresh_list()
+        
+    @pyqtSlot(list)
+    def on_frames_extracted(self, frame_paths):
+        """
+        Обработчик извлечения кадров из видео.
+        Импортирует извлеченные кадры в MediaImporterWidget.
+        
+        :param frame_paths: список путей к извлеченным кадрам
+        """
+        # Обработка уже реализована в MediaImporterWidget.import_extracted_frames
+        pass 
