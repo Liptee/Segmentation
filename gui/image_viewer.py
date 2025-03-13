@@ -39,6 +39,13 @@ class PinchableGraphicsView(QGraphicsView):
         self.grabGesture(Qt.PinchGesture)
         self._current_scale = 1.0
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.min_scale_factor = 1.0  # Минимальный масштаб (изображение полностью видно)
+        self._last_pan_pos = None  # Для отслеживания перемещения
+        self._is_edit_mode = False  # Флаг режима редактирования
+
+    def set_edit_mode(self, is_edit):
+        """Устанавливает флаг режима редактирования"""
+        self._is_edit_mode = is_edit
 
     def event(self, event):
         if event.type() == event.Gesture:
@@ -51,10 +58,93 @@ class PinchableGraphicsView(QGraphicsView):
             changeFlags = pinch.changeFlags()
             if changeFlags & QPinchGesture.ScaleFactorChanged:
                 factor = pinch.scaleFactor()
+                
+                # Проверяем, не является ли это слишком малым изменением масштаба,
+                # которое может быть вызвано случайным движением при панорамировании
+                if 0.98 < factor < 1.02:
+                    return True
+                
+                # Проверяем, не приведет ли масштабирование к слишком маленькому масштабу
+                if factor < 1.0 and self.is_image_fully_visible():
+                    # Если изображение уже полностью видно, не уменьшаем масштаб
+                    return True
+                
                 self._current_scale *= factor
                 self.scale(factor, factor)
             return True
         return False
+        
+    def mousePressEvent(self, event):
+        # В режиме редактирования позволяем стандартную обработку для взаимодействия с объектами
+        if self._is_edit_mode:
+            super().mousePressEvent(event)
+            return
+            
+        # Запоминаем начальную позицию для панорамирования
+        if event.button() == Qt.LeftButton:
+            self._last_pan_pos = event.pos()
+        super().mousePressEvent(event)
+        
+    def mouseMoveEvent(self, event):
+        # В режиме редактирования позволяем стандартную обработку для взаимодействия с объектами
+        if self._is_edit_mode:
+            super().mouseMoveEvent(event)
+            return
+            
+        # Обрабатываем панорамирование вручную, если нажата левая кнопка мыши
+        if event.buttons() & Qt.LeftButton and self._last_pan_pos:
+            delta = event.pos() - self._last_pan_pos
+            self._last_pan_pos = event.pos()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+        else:
+            super().mouseMoveEvent(event)
+            
+    def mouseReleaseEvent(self, event):
+        # В режиме редактирования позволяем стандартную обработку для взаимодействия с объектами
+        if self._is_edit_mode:
+            super().mouseReleaseEvent(event)
+            return
+            
+        if event.button() == Qt.LeftButton:
+            self._last_pan_pos = None
+        super().mouseReleaseEvent(event)
+        
+    def is_image_fully_visible(self):
+        """Проверяет, полностью ли видно изображение в окне просмотра"""
+        if not self.scene() or self.scene().items() == []:
+            return True
+            
+        # Получаем прямоугольник сцены (содержащий все элементы)
+        scene_rect = self.scene().itemsBoundingRect()
+        # Получаем прямоугольник области просмотра
+        view_rect = self.viewport().rect()
+        # Преобразуем прямоугольник области просмотра в координаты сцены
+        view_rect_scene = self.mapToScene(view_rect).boundingRect()
+        
+        # Если прямоугольник сцены полностью помещается в прямоугольник области просмотра,
+        # то изображение полностью видно
+        return view_rect_scene.contains(scene_rect)
+
+    def fit_in_view(self):
+        """Масштабирует вид так, чтобы все содержимое сцены было видно"""
+        if not self.scene() or self.scene().items() == []:
+            return
+            
+        # Сбрасываем текущее преобразование
+        self.resetTransform()
+        self._current_scale = 1.0
+        
+        # Получаем прямоугольник сцены (содержащий все элементы)
+        scene_rect = self.scene().itemsBoundingRect()
+        
+        # Масштабируем вид так, чтобы сцена полностью поместилась в окне просмотра
+        # с небольшим отступом
+        self.fitInView(scene_rect, Qt.KeepAspectRatio)
+        
+        # Обновляем текущий масштаб
+        transform = self.transform()
+        self._current_scale = transform.m11()  # Масштаб по оси X
 
 class CrosshairGraphicsScene(QGraphicsScene):
     """Сцена с отображением перекрестия при выборе инструмента выделения"""
@@ -113,6 +203,7 @@ class ImageViewerWidget(QWidget):
     MODE_RECT_SELECT = 1
     MODE_EDIT = 2
     MODE_POLYGON_SELECT = 3
+    MODE_PAN = 4  # Добавляем режим панорамирования
 
     def __init__(self, parent=None, class_manager=None):
         super().__init__(parent)
@@ -137,7 +228,7 @@ class ImageViewerWidget(QWidget):
         self.object_labeler = None
         
         # Переменные для режима выделения прямоугольника
-        self.current_mode = self.MODE_VIEW
+        self.current_mode = self.MODE_PAN
         self.start_point = None
         self.current_rect = None
         self.selected_item = None
@@ -171,6 +262,10 @@ class ImageViewerWidget(QWidget):
         self.toolbar.setIconSize(QSize(32, 32))
         
         # Создаем действия для инструментов
+        self.action_pan = QAction("Перемещение", self)
+        self.action_pan.setCheckable(True)
+        self.action_pan.triggered.connect(lambda: self.set_tool_mode(self.MODE_PAN))
+        
         self.action_rect_select = QAction("Выделение", self)
         self.action_rect_select.setCheckable(True)
         self.action_rect_select.triggered.connect(lambda: self.set_tool_mode(self.MODE_RECT_SELECT))
@@ -184,6 +279,7 @@ class ImageViewerWidget(QWidget):
         self.action_edit.triggered.connect(lambda: self.set_tool_mode(self.MODE_EDIT))
         
         # Добавляем действия на панель инструментов
+        self.toolbar.addAction(self.action_pan)
         self.toolbar.addAction(self.action_rect_select)
         self.toolbar.addAction(self.action_polygon_select)
         self.toolbar.addAction(self.action_edit)
@@ -240,7 +336,7 @@ class ImageViewerWidget(QWidget):
         self.slider_gamma.valueChanged.connect(self.update_image_adjustments)
         
         # Устанавливаем режим просмотра по умолчанию
-        self.set_tool_mode(self.MODE_VIEW)
+        self.set_tool_mode(self.MODE_PAN)
         
         # Устанавливаем фокус на view для обработки клавиатурных событий
         self.view.setFocusPolicy(Qt.StrongFocus)
@@ -294,8 +390,15 @@ class ImageViewerWidget(QWidget):
         # Загружаем ранее сохраненные аннотации для этого изображения
         self.load_annotations_for_image(file_path)
         
+        # Сбрасываем масштаб и подгоняем изображение под размер окна
         self.zoom_factor = 1.0
         self.view.resetTransform()
+        
+        # Подгоняем изображение под размер окна
+        self.view.fit_in_view()
+        
+        # Обновляем zoom_factor на основе текущего масштаба
+        self.zoom_factor = self.view._current_scale
 
         logger.info(f"ImageViewer: Загружено изображение: {file_path}, восстановлено аннотаций: {len(self.annotations)}")
         return True
@@ -323,6 +426,11 @@ class ImageViewerWidget(QWidget):
     # Переопределяем wheelEvent только для случаев, когда жесты пинча не срабатывают (например, с мышью)
     def wheelEvent(self, event: QWheelEvent):
         angle = event.angleDelta().y()
+        
+        # Если пытаемся уменьшить масштаб (отдалить) и изображение уже полностью видно, ничего не делаем
+        if angle < 0 and self.view.is_image_fully_visible():
+            return
+            
         factor = 1.25 if angle > 0 else 0.8
         self.zoom_factor *= factor
         self.view.scale(factor, factor)
@@ -332,16 +440,24 @@ class ImageViewerWidget(QWidget):
         return self.current_adjusted_image
         
     def set_tool_mode(self, mode):
-        """Устанавливает текущий режим работы инструмента"""
+        """Устанавливает текущий режим инструмента"""
         self.current_mode = mode
         
-        # Сбрасываем состояние всех кнопок
+        # Сбрасываем все кнопки
+        self.action_pan.setChecked(False)
         self.action_rect_select.setChecked(False)
         self.action_polygon_select.setChecked(False)
         self.action_edit.setChecked(False)
         
-        # Устанавливаем соответствующий курсор и режим перетаскивания
-        if mode == self.MODE_VIEW:
+        # Сначала устанавливаем режим редактирования для view
+        self.view.set_edit_mode(mode == self.MODE_EDIT)
+        
+        # Устанавливаем соответствующую кнопку как активную
+        if mode == self.MODE_PAN:
+            self.action_pan.setChecked(True)
+            # Отключаем наш собственный обработчик панорамирования
+            self.view._last_pan_pos = None
+            # Используем встроенный режим перетаскивания QGraphicsView
             self.view.setDragMode(QGraphicsView.ScrollHandDrag)
             self.view.viewport().setCursor(Qt.OpenHandCursor)
             self.scene.setShowCrosshair(False)
@@ -350,10 +466,11 @@ class ImageViewerWidget(QWidget):
                 if isinstance(item, (SelectableRectItem, SelectablePolygonItem)):
                     item.setFlag(QGraphicsItem.ItemIsSelectable, False)
                     item.setFlag(QGraphicsItem.ItemIsMovable, False)
+        
         elif mode == self.MODE_RECT_SELECT:
             self.action_rect_select.setChecked(True)
+            # Отключаем режим перетаскивания
             self.view.setDragMode(QGraphicsView.NoDrag)
-            # Устанавливаем курсор-перекрестие
             self.view.viewport().setCursor(Qt.CrossCursor)
             self.scene.setShowCrosshair(True)
             # Отключаем интерактивность для всех фигур
@@ -361,10 +478,11 @@ class ImageViewerWidget(QWidget):
                 if isinstance(item, (SelectableRectItem, SelectablePolygonItem)):
                     item.setFlag(QGraphicsItem.ItemIsSelectable, False)
                     item.setFlag(QGraphicsItem.ItemIsMovable, False)
+        
         elif mode == self.MODE_POLYGON_SELECT:
             self.action_polygon_select.setChecked(True)
+            # Отключаем режим перетаскивания
             self.view.setDragMode(QGraphicsView.NoDrag)
-            # Устанавливаем курсор-перекрестие
             self.view.viewport().setCursor(Qt.CrossCursor)
             self.scene.setShowCrosshair(True)
             # Отключаем интерактивность для всех фигур
@@ -377,9 +495,11 @@ class ImageViewerWidget(QWidget):
             if self.temp_line:
                 self.scene.removeItem(self.temp_line)
                 self.temp_line = None
+        
         elif mode == self.MODE_EDIT:
             self.action_edit.setChecked(True)
-            self.view.setDragMode(QGraphicsView.NoDrag)
+            # Отключаем режим перетаскивания для вида, чтобы можно было взаимодействовать с объектами
+            self.view.setDragMode(QGraphicsView.RubberBandDrag)  # Позволяет выделять несколько объектов
             self.view.viewport().setCursor(Qt.ArrowCursor)
             self.scene.setShowCrosshair(False)
             # Включаем интерактивность для всех фигур
@@ -415,16 +535,16 @@ class ImageViewerWidget(QWidget):
             
             # В режиме редактирования позволяем событиям проходить к элементам сцены
             if self.current_mode == self.MODE_EDIT:
-                # Проверяем, что это событие мыши, прежде чем вызывать pos()
+                # Для режима редактирования просто пропускаем события мыши
+                # чтобы QGraphicsView мог обрабатывать их стандартным образом
                 if event.type() in [event.MouseButtonPress, event.MouseButtonRelease, event.MouseMove, event.MouseButtonDblClick]:
-                    scene_pos = self.view.mapToScene(event.pos())
-                    items = self.scene.items(scene_pos)
-                    
-                    # Проверяем, есть ли под курсором выделяемый объект
-                    for item in items:
-                        if isinstance(item, (SelectableRectItem, SelectablePolygonItem)):
-                            # Если это двойной клик, показываем диалог выбора класса
-                            if event.type() == event.MouseButtonDblClick and event.button() == Qt.LeftButton:
+                    # Только для двойного клика показываем диалог выбора класса
+                    if event.type() == event.MouseButtonDblClick and event.button() == Qt.LeftButton:
+                        scene_pos = self.view.mapToScene(event.pos())
+                        items = self.scene.items(scene_pos)
+                        
+                        for item in items:
+                            if isinstance(item, (SelectableRectItem, SelectablePolygonItem)):
                                 # Выбираем объект перед открытием диалога
                                 item.setSelected(True)
                                 self.selected_item = item
@@ -432,12 +552,10 @@ class ImageViewerWidget(QWidget):
                                 # Вызываем диалог выбора класса
                                 self.show_object_labeler(item)
                                 return True
-                            # Если это нажатие кнопки мыши, запоминаем выбранный объект
-                            elif event.type() == event.MouseButtonPress and event.button() == Qt.LeftButton:
-                                self.selected_item = item
-                            
-                            # Позволяем событию пройти дальше для обработки элементом
-                            return False
+                    
+                    # Для остальных событий мыши в режиме редактирования
+                    # позволяем QGraphicsView обрабатывать их стандартным образом
+                    return False
             
             # Обрабатываем события для режимов просмотра и выделения
             if event.type() == event.MouseButtonPress and event.button() == Qt.LeftButton:
@@ -646,6 +764,13 @@ class ImageViewerWidget(QWidget):
             if len(self.polygon_points) >= 3:  # Полигон должен иметь хотя бы 3 точки
                 self.complete_polygon()
                 return
+            
+        # Подгонка изображения под размер окна при нажатии клавиши F (если не в режиме полигона)
+        if self.current_mode != self.MODE_POLYGON_SELECT and event.key() == Qt.Key_F:
+            self.view.fit_in_view()
+            # Обновляем zoom_factor на основе текущего масштаба
+            self.zoom_factor = self.view._current_scale
+            return
             
         super().keyPressEvent(event)
 
