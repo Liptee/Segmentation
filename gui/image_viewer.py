@@ -249,6 +249,16 @@ class ImageViewerWidget(QWidget):
             self.object_labeler.newClassRequested.connect(self.request_new_class)
         else:
             self.object_labeler.class_manager = class_manager
+            
+        # Подключаем сигналы от менеджера классов
+        if hasattr(class_manager, 'classUpdated'):
+            class_manager.classUpdated.connect(self.on_class_updated)
+        if hasattr(class_manager, 'classRemoved'):
+            class_manager.classRemoved.connect(self.on_class_removed)
+        if hasattr(class_manager, 'classesMerged'):
+            class_manager.classesMerged.connect(self.on_classes_merged)
+        if hasattr(class_manager, 'classesChanged'):
+            class_manager.classesChanged.connect(self.refresh_annotations)
 
     def _init_ui(self):
         main_layout = QHBoxLayout(self)
@@ -801,6 +811,87 @@ class ImageViewerWidget(QWidget):
             self.save_current_annotations()
             logger.info(f"ImageViewer: Класс назначен и аннотации сохранены для {self.current_image_path}")
     
+    def on_class_updated(self, old_name, new_name, new_color):
+        """Обработчик события обновления класса в ClassManager"""
+        logger.info(f"ImageViewer.on_class_updated: Обновление класса '{old_name}' на '{new_name}' с цветом {new_color}")
+        
+        # Сохраняем текущие аннотации на случай, если они не были сохранены
+        self.save_current_annotations()
+        
+        # Обновляем классы во всех аннотациях
+        updated_count = self.annotation_manager.update_class_name(old_name, new_name, new_color)
+        
+        # Обновляем текущие отображаемые аннотации, если необходимо
+        for annotation in self.annotations:
+            if hasattr(annotation, 'class_name') and annotation.class_name == old_name:
+                class_data = {
+                    'id': new_name,
+                    'name': new_name,
+                    'color': new_color
+                }
+                annotation.set_class(class_data)
+        
+        # Обновляем сцену
+        if self.scene:
+            self.scene.update()
+            
+        logger.info(f"ImageViewer.on_class_updated: Обновлено {updated_count} аннотаций")
+    
+    def on_class_removed(self, class_name):
+        """Обработчик события удаления класса в ClassManager"""
+        logger.info(f"ImageViewer.on_class_removed: Удаление класса '{class_name}'")
+        
+        # Сохраняем текущие аннотации на случай, если они не были сохранены
+        self.save_current_annotations()
+        
+        # Обновляем текущие отображаемые аннотации, если необходимо
+        for annotation in self.annotations:
+            if hasattr(annotation, 'class_name') and annotation.class_name == class_name:
+                class_data = {
+                    'id': None,
+                    'name': None,
+                    'color': "#7F7F7F"  # Серый цвет для аннотаций без класса
+                }
+                annotation.set_class(class_data)
+        
+        # Обновляем сцену
+        if self.scene:
+            self.scene.update()
+    
+    def on_classes_merged(self, class_names, target_name, target_color):
+        """Обработчик события объединения классов в ClassManager"""
+        logger.info(f"ImageViewer.on_classes_merged: Объединение классов {class_names} в '{target_name}'")
+        
+        # Сохраняем текущие аннотации на случай, если они не были сохранены
+        self.save_current_annotations()
+        
+        # Обновляем классы во всех аннотациях через AnnotationManager
+        self.annotation_manager.merge_classes(class_names, target_name, target_color)
+        
+        # Обновляем текущие отображаемые аннотации, если необходимо
+        for annotation in self.annotations:
+            if hasattr(annotation, 'class_name') and annotation.class_name in class_names and annotation.class_name != target_name:
+                class_data = {
+                    'id': target_name,
+                    'name': target_name,
+                    'color': target_color
+                }
+                annotation.set_class(class_data)
+        
+        # Обновляем сцену
+        if self.scene:
+            self.scene.update()
+    
+    def refresh_annotations(self):
+        """Обновляет отображение текущих аннотаций"""
+        if self.current_image_path:
+            # Перезагружаем аннотации для текущего изображения
+            self.load_annotations_for_image(self.current_image_path)
+        
+        # Обновляем сцену
+        if self.scene:
+            self.scene.update()
+
     def request_new_class(self):
         """Запрашивает создание нового класса через менеджер классов"""
         if self.class_manager and hasattr(self.class_manager, 'openAddClassDialog'):

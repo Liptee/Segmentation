@@ -81,6 +81,13 @@ class MainWindow(QMainWindow):
         # Подключаем сигнал сохранения кадра от VideoPlayer
         self.video_player.frameSaved.connect(self.on_frame_saved)
         
+        # Устанавливаем связь между менеджером классов и просмотрщиком изображений
+        self.image_viewer.set_class_manager(self.class_manager)
+        
+        # Подключаем сигналы изменения классов для обновления отображения
+        if hasattr(self.class_manager, 'classesChanged'):
+            self.class_manager.classesChanged.connect(self.media_importer.refresh_list)
+            
         # Установка начального режима
         self.on_mode_changed(self.media_importer.mode)
     
@@ -112,22 +119,17 @@ class MainWindow(QMainWindow):
             self.media_stack.setCurrentIndex(0)  # Показать ImageViewer
         elif mode == "video":
             self.media_stack.setCurrentIndex(1)  # Показать VideoPlayer 
-
+    
     @pyqtSlot(str)
     def on_frame_saved(self, frame_path):
         """
-        Обработчик сохранения кадра видео.
-        Импортирует сохраненный кадр в MediaImporterWidget.
+        Обработчик сохранения кадра в VideoPlayer.
+        Автоматически импортирует сохраненный кадр в MediaImporter.
         
-        :param frame_path: путь к сохраненному файлу кадра
+        :param frame_path: путь к сохраненному кадру
         """
-        # Принудительно переключаемся в режим изображений
-        self.media_importer.switch_to_images()
-        # Импортируем изображение
         self.media_importer.import_file(frame_path)
-        # Обновляем список
-        self.media_importer.refresh_list()
-        
+
     @pyqtSlot(list)
     def on_frames_extracted(self, frame_paths):
         """

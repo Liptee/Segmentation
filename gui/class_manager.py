@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QApplication, QMessageBox, QFileDialog, QInputDialog, QDialog, QColorDialog, QDialogButtonBox
 )
 from PyQt5.QtGui import QPixmap, QPainter, QBrush, QColor, QIcon
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from core.class_manager import SegmentationClassManager
 from logger import logger
 
@@ -168,6 +168,21 @@ class SegmentationClassManagerWidget(QWidget):
     Позволяет добавлять, удалять, объединять классы и экспортировать их в JSON.
     Редактирование класса осуществляется по двойному щелчку на элемент списка.
     """
+    # Сигнал, который отправляется при изменении класса
+    # (old_name, new_name, new_color)
+    classUpdated = pyqtSignal(str, str, str)
+    
+    # Сигнал, который отправляется при удалении класса
+    # (name)
+    classRemoved = pyqtSignal(str)
+    
+    # Сигнал, который отправляется при объединении классов
+    # (list_of_names, target_name, target_color)
+    classesMerged = pyqtSignal(list, str, str)
+    
+    # Сигнал, информирующий об изменениях в классах (для обновления UI)
+    classesChanged = pyqtSignal()
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.manager = SegmentationClassManager()
@@ -237,6 +252,8 @@ class SegmentationClassManagerWidget(QWidget):
             try:
                 self.manager.add_class(name, color, description)
                 self.refreshList()
+                # Отправляем сигнал об изменении списка классов
+                self.classesChanged.emit()
             except ValueError as e:
                 QMessageBox.warning(self, "Ошибка", str(e))
 
@@ -253,30 +270,73 @@ class SegmentationClassManagerWidget(QWidget):
                 try:
                     self.manager.add_class(new_name, new_color, new_desc)
                     self.manager.remove_class(name)
+                    # Отправляем сигнал об обновлении класса в аннотациях
+                    self.classUpdated.emit(name, new_name, new_color)
                 except ValueError as e:
                     QMessageBox.warning(self, "Ошибка", str(e))
                     return
             else:
                 try:
+                    old_color = self.manager.classes[name]['color']
                     self.manager.update_class_color(name, new_color)
                     self.manager.update_class_description(name, new_desc)
+                    # Отправляем сигнал об обновлении цвета класса
+                    if old_color != new_color:
+                        self.classUpdated.emit(name, name, new_color)
                 except ValueError as e:
                     QMessageBox.warning(self, "Ошибка", str(e))
                     return
             self.refreshList()
+            # Отправляем сигнал об изменении списка классов
+            self.classesChanged.emit()
 
     def removeSelected(self):
         selectedItems = self.classListWidget.selectedItems()
         if not selectedItems:
             QMessageBox.warning(self, "Ошибка", "Выберите класс для удаления")
             return
+        
+        # Получаем основное окно для доступа к annotation_manager
+        main_window = self.get_main_window()
+        if not main_window or not hasattr(main_window, 'image_viewer') or not hasattr(main_window.image_viewer, 'annotation_manager'):
+            QMessageBox.warning(self, "Ошибка", "Не удалось получить доступ к менеджеру аннотаций")
+            return
+        
+        annotation_manager = main_window.image_viewer.annotation_manager
+        
         for item in selectedItems:
             name = item.data(Qt.UserRole)
+            
+            # Проверяем, используется ли этот класс в аннотациях
+            count, affected_images = annotation_manager.count_annotations_by_class(name)
+            
+            if count > 0:
+                # Спрашиваем подтверждение пользователя перед удалением класса
+                message = f"Класс '{name}' используется в {count} аннотациях на {len(affected_images)} изображениях.\n"
+                message += "При удалении класса все эти аннотации будут помечены как 'без класса'.\n\n"
+                message += "Вы уверены, что хотите удалить этот класс?"
+                
+                reply = QMessageBox.question(self, "Подтверждение удаления", 
+                                             message, 
+                                             QMessageBox.Yes | QMessageBox.No, 
+                                             QMessageBox.No)
+                
+                if reply == QMessageBox.No:
+                    continue
+                
+                # Обновляем аннотации перед удалением класса
+                annotation_manager.remove_class(name)
+                # Отправляем сигнал об удалении класса
+                self.classRemoved.emit(name)
+            
             try:
                 self.manager.remove_class(name)
             except ValueError as e:
                 QMessageBox.warning(self, "Ошибка", str(e))
+        
         self.refreshList()
+        # Отправляем сигнал об изменении списка классов
+        self.classesChanged.emit()
 
     def mergeSelected(self):
         selectedItems = self.classListWidget.selectedItems()
@@ -292,9 +352,15 @@ class SegmentationClassManagerWidget(QWidget):
                 return
             try:
                 self.manager.merge_classes(classNames, target_name,
-                                             target_color=target_color,
-                                             target_description=target_desc)
+                                          target_color=target_color,
+                                          target_description=target_desc)
+                
+                # Отправляем сигнал об объединении классов
+                self.classesMerged.emit(classNames, target_name, target_color)
+                
                 self.refreshList()
+                # Отправляем сигнал об изменении списка классов
+                self.classesChanged.emit()
             except ValueError as e:
                 QMessageBox.warning(self, "Ошибка", str(e))
 
@@ -321,3 +387,13 @@ class SegmentationClassManagerWidget(QWidget):
             logger.info(f"ClassManager: Класс {i+1}: {cls.get('name')}, ID={cls.get('id')}, цвет={cls.get('color')}")
         
         return classes_list
+
+    def get_main_window(self):
+        """Получает ссылку на главное окно приложения"""
+        parent = self.parent()
+        while parent is not None:
+            # Проверяем, имеет ли родитель атрибуты, характерные для главного окна
+            if hasattr(parent, 'image_viewer') and hasattr(parent, 'media_importer'):
+                return parent
+            parent = parent.parent()
+        return None

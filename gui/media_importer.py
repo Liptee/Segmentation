@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget, QListWidgetItem,
     QLabel, QFileDialog, QMessageBox, QMenu, QAction
 )
-from PyQt5.QtGui import QPixmap, QImage, QIcon, QPainter, QBrush, QColor, QDragEnterEvent, QDropEvent
+from PyQt5.QtGui import QPixmap, QImage, QIcon, QPainter, QBrush, QColor, QDragEnterEvent, QDropEvent, QPen
 from PyQt5.QtCore import Qt, QSize, pyqtSignal
 
 # Поддерживаемые расширения
@@ -33,7 +33,14 @@ class MediaItem:
         except Exception:
             return None
 
-def generate_image_thumbnail(file_path):
+def generate_image_thumbnail(file_path, annotation_status="none"):
+    """
+    Генерирует миниатюру изображения с индикатором статуса аннотации
+    
+    Args:
+        file_path: Путь к изображению
+        annotation_status: Статус аннотации ('none', 'incomplete', 'complete')
+    """
     # Загружаем изображение через QPixmap и принудительно масштабируем до THUMB_SIZE×THUMB_SIZE
     pix = QPixmap(file_path)
     if pix.isNull():
@@ -42,6 +49,26 @@ def generate_image_thumbnail(file_path):
     else:
         # Чтобы получить квадратную миниатюру без искажений, используем режим IgnoreAspectRatio
         pix = pix.scaled(THUMB_SIZE, THUMB_SIZE, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    
+    # Добавляем индикатор статуса разметки
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.Antialiasing)
+    
+    # Выбираем цвет в зависимости от статуса
+    if annotation_status == "none":
+        color = QColor(255, 0, 0)  # Красный - нет разметки
+    elif annotation_status == "incomplete":
+        color = QColor(255, 255, 0)  # Желтый - есть метки без класса
+    else:  # "complete"
+        color = QColor(0, 255, 0)  # Зеленый - валидная разметка
+    
+    # Рисуем круг в левом нижнем углу
+    circle_size = THUMB_SIZE // 8
+    painter.setBrush(QBrush(color))
+    painter.setPen(QPen(Qt.black, 1))
+    painter.drawEllipse(5, THUMB_SIZE - circle_size - 5, circle_size, circle_size)
+    
+    painter.end()
     return pix
 
 def generate_video_thumbnail(file_path):
@@ -130,6 +157,11 @@ class MediaImporterWidget(QWidget):
         mainLayout.addLayout(btnLayout)
 
         self.setLayout(mainLayout)
+        
+        # Подключаемся к сигналам изменения классов, если от родителя доступен класс-менеджер
+        main_window = self.get_main_window()
+        if main_window and hasattr(main_window, 'class_manager') and hasattr(main_window.class_manager, 'classesChanged'):
+            main_window.class_manager.classesChanged.connect(self.refresh_list)
 
     def switch_to_images(self):
         self.mode = "image"
@@ -205,12 +237,26 @@ class MediaImporterWidget(QWidget):
 
     def refresh_list(self):
         self.listWidget.clear()
+        
+        # Получаем доступ к AnnotationManager для проверки статуса аннотаций
+        annotation_manager = None
+        main_window = self.get_main_window()
+        if main_window and hasattr(main_window, 'image_viewer') and hasattr(main_window.image_viewer, 'annotation_manager'):
+            annotation_manager = main_window.image_viewer.annotation_manager
+        
         for item in self.imported_items[self.mode]:
             list_item = QListWidgetItem()
+            
             if item.media_type == "image":
-                thumb = generate_image_thumbnail(item.file_path)
+                # Определяем статус аннотации
+                annotation_status = "none"
+                if annotation_manager:
+                    annotation_status = annotation_manager.get_image_annotation_status(item.file_path)
+                
+                thumb = generate_image_thumbnail(item.file_path, annotation_status)
             else:
                 thumb = generate_video_thumbnail(item.file_path)
+                
             list_item.setIcon(QIcon(thumb))
             list_item.setText(os.path.basename(item.file_path))
             list_item.setData(Qt.UserRole, item)
@@ -385,6 +431,9 @@ class MediaImporterWidget(QWidget):
         source_file = os.path.basename(self.copied_annotation['source_file'])
         target_file = os.path.basename(target_file)
         QMessageBox.information(self, "Вставка", f"Разметка из {source_file} вставлена в {target_file}")
+        
+        # Обновляем список после вставки разметки
+        self.refresh_list()
         
     def get_main_window(self):
         """Получает ссылку на главное окно приложения"""

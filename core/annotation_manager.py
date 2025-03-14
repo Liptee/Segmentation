@@ -121,6 +121,117 @@ class AnnotationManager:
         logger.info(f"AnnotationManager.load_annotations: Загружено {len(loaded_items)} аннотаций")
         return loaded_items
 
+    def update_class_name(self, old_name, new_name, new_color):
+        """
+        Обновляет название класса во всех аннотациях с old_name на new_name
+        и соответствующим образом меняет цвет
+        """
+        logger.info(f"AnnotationManager.update_class_name: Обновление класса '{old_name}' на '{new_name}' с цветом {new_color}")
+        count = 0
+        
+        for image_path, annotations in self.annotations_by_image.items():
+            updated = False
+            for annotation in annotations:
+                if annotation.get('class') and annotation['class'].get('name') == old_name:
+                    annotation['class']['name'] = new_name
+                    annotation['class']['id'] = new_name
+                    annotation['class']['color'] = new_color
+                    updated = True
+                    count += 1
+            
+            if updated:
+                logger.info(f"  Обновлены аннотации в изображении: {image_path}")
+        
+        logger.info(f"AnnotationManager.update_class_name: Обновлено {count} аннотаций")
+        return count
+
+    def remove_class(self, class_name):
+        """
+        Устанавливает класс всех аннотаций с указанным именем на None
+        Возвращает количество и список изображений с такими аннотациями
+        """
+        logger.info(f"AnnotationManager.remove_class: Удаление класса '{class_name}'")
+        count = 0
+        affected_images = []
+        
+        for image_path, annotations in self.annotations_by_image.items():
+            updated = False
+            for annotation in annotations:
+                if annotation.get('class') and annotation['class'].get('name') == class_name:
+                    # Установка класса в None (базовая настройка)
+                    annotation['class']['name'] = None
+                    annotation['class']['id'] = None
+                    annotation['class']['color'] = "#7F7F7F"  # Серый цвет для аннотаций без класса
+                    updated = True
+                    count += 1
+            
+            if updated:
+                affected_images.append(image_path)
+                logger.info(f"  Обновлены аннотации в изображении: {image_path}")
+        
+        logger.info(f"AnnotationManager.remove_class: Обновлено {count} аннотаций в {len(affected_images)} изображениях")
+        return count, affected_images
+
+    def merge_classes(self, class_names, target_name, target_color):
+        """
+        Объединяет классы, заменяя все указанные имена на целевое имя и цвет
+        Возвращает количество обновленных аннотаций
+        """
+        logger.info(f"AnnotationManager.merge_classes: Объединение классов {class_names} в '{target_name}'")
+        count = 0
+        
+        # Обрабатываем все классы, кроме целевого
+        classes_to_update = [name for name in class_names if name != target_name]
+        
+        for class_name in classes_to_update:
+            count += self.update_class_name(class_name, target_name, target_color)
+        
+        logger.info(f"AnnotationManager.merge_classes: Всего обновлено {count} аннотаций")
+        return count
+
+    def count_annotations_by_class(self, class_name):
+        """
+        Подсчитывает количество аннотаций с указанным классом
+        и возвращает количество и список изображений
+        """
+        logger.info(f"AnnotationManager.count_annotations_by_class: Подсчет аннотаций с классом '{class_name}'")
+        count = 0
+        affected_images = []
+        
+        for image_path, annotations in self.annotations_by_image.items():
+            image_count = 0
+            for annotation in annotations:
+                if annotation.get('class') and annotation['class'].get('name') == class_name:
+                    image_count += 1
+            
+            if image_count > 0:
+                count += image_count
+                affected_images.append(image_path)
+                logger.info(f"  Изображение {image_path}: {image_count} аннотаций")
+        
+        logger.info(f"AnnotationManager.count_annotations_by_class: Всего {count} аннотаций в {len(affected_images)} изображениях")
+        return count, affected_images
+
+    def get_image_annotation_status(self, image_path):
+        """
+        Определяет статус аннотаций для изображения:
+        - Нет аннотаций: "none"
+        - Есть аннотации без класса (None): "incomplete"
+        - Все аннотации имеют валидные классы: "complete"
+        """
+        if image_path not in self.annotations_by_image or not self.annotations_by_image[image_path]:
+            return "none"
+            
+        has_none = False
+        for annotation in self.annotations_by_image[image_path]:
+            if not annotation.get('class') or annotation['class'].get('name') is None:
+                has_none = True
+                
+        if has_none:
+            return "incomplete"
+        else:
+            return "complete"
+
     def export_to_json(self, output_file):
         # При экспорте можно преобразовывать абсолютные пути к изображениям в относительные
         base_dir = os.path.dirname(output_file)
