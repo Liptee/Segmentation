@@ -6,9 +6,10 @@ from PyQt5.QtWidgets import (
     QProgressBar, QListWidget, QListWidgetItem,
     QSplitter, QFileDialog, QMessageBox, QDialog,  QSizePolicy
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QUrl
 from PyQt5.QtGui import QPixmap, QImage
-
+from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+from gui.video_player import ClickableVideoWidget
 from gui.utils import convert_np_to_qimage, ms_to_str
 from logger import logger
 from core.effects import (
@@ -191,7 +192,7 @@ class VideoExtractorWidget(QWidget):
         self.fps = 0
         self.trim_start_ms = 0
         self.trim_end_ms = 0
-        
+
         self.init_ui()
         
         # Load video if path is provided
@@ -207,17 +208,22 @@ class VideoExtractorWidget(QWidget):
         bottom_splitter = QSplitter(Qt.Horizontal)
         
         # === Top Left: Video Player ===
-        # Instead of using a full VideoPlayer, we'll create a simpler video display
         video_container = QWidget()
         video_layout = QVBoxLayout(video_container)
         
-        # Use a QLabel for video preview
-        self.video_preview = QLabel("Video preview")
-        self.video_preview.setAlignment(Qt.AlignCenter)
-        self.video_preview.setMinimumSize(320, 240)
-        self.video_preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.video_preview.setStyleSheet("background-color: #1e1e1e; border: 1px solid #444;")
-        video_layout.addWidget(self.video_preview)
+        # Use QMediaPlayer and ClickableVideoWidget for video playback
+        self.mediaPlayer = QMediaPlayer(None, QMediaPlayer.VideoSurface)
+        self.videoWidget = ClickableVideoWidget()
+        self.videoWidget.clicked.connect(self.toggle_play)
+        self.videoWidget.setMinimumSize(320, 240)
+        self.videoWidget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.mediaPlayer.setVideoOutput(self.videoWidget)
+        video_layout.addWidget(self.videoWidget)
+        
+        # Connect media player signals
+        self.mediaPlayer.positionChanged.connect(self.position_changed)
+        self.mediaPlayer.durationChanged.connect(self.duration_changed)
+        self.mediaPlayer.stateChanged.connect(self.media_state_changed)
         
         # Add trim slider 
         self.trim_slider = TrimSlider()
@@ -346,44 +352,38 @@ class VideoExtractorWidget(QWidget):
         bottom_splitter.setSizes([500, 500])
         main_splitter.setSizes([600, 400])
         
-        # Video playback handling variables
-        self.video_timer = QTimer(self)
-        self.video_timer.timeout.connect(self.update_video_frame)
-        self.is_playing = False
-        self.current_position = 0
-    
     def load_video(self, video_path):
         """Load a video file"""
         self.video_path = video_path
         
-        # Open video with OpenCV to get metadata
+        # Load video with QMediaPlayer
+        self.mediaPlayer.setMedia(QMediaContent(QUrl.fromLocalFile(video_path)))
+        
+        # We still need OpenCV for frame extraction and metadata
         self.cap = cv2.VideoCapture(video_path)
         if not self.cap.isOpened():
             QMessageBox.critical(self, "Error", f"Could not open video file: {video_path}")
             return False
             
+        # Get metadata from OpenCV
         self.frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         self.duration_ms = int(self.frame_count * 1000 / self.fps) if self.fps > 0 else 0
         
-        # Update trim slider and position slider
+        # Update trim slider ranges
         self.trim_slider.set_range(0, self.duration_ms)
         self.trim_start_ms = 0
         self.trim_end_ms = self.duration_ms
         
-        self.position_slider.setRange(0, self.duration_ms)
+        # Reset position
         self.position_slider.setValue(0)
         self.update_position_label(0, self.duration_ms)
         
-        # Get first frame for preview
-        ret, frame = self.cap.read()
-        if ret:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Load first frame for preview
+        frame = self.get_frame_at_position(0)
+        if frame is not None:
             self.preview_frame = frame.copy()
             self.frame_preview.set_frame(frame)
-            
-            # Display first frame in video preview
-            self.update_video_preview(frame)
         
         return True
     
@@ -433,75 +433,37 @@ class VideoExtractorWidget(QWidget):
         self.trim_start_ms = start_ms
         self.trim_end_ms = end_ms
     
-    def update_video_preview(self, frame):
-        """Update the video preview with the current frame"""
-        if frame is None:
-            return
-            
-        # Convert frame to QImage and QPixmap
-        q_img = convert_np_to_qimage(frame)
-        if q_img:
-            pixmap = QPixmap.fromImage(q_img)
-            scaled_pixmap = pixmap.scaled(
-                self.video_preview.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-            self.video_preview.setPixmap(scaled_pixmap)
-    
     def set_position(self, position):
         """Set the video position in milliseconds"""
-        self.current_position = position
-        # Update slider
-        self.position_slider.setValue(position)
-        self.update_position_label(position, self.duration_ms)
-        
-        # Set the frame at this position
-        if self.cap:
-            frame_pos = int((position / 1000.0) * self.fps)
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
-            ret, frame = self.cap.read()
-            if ret:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                self.update_video_preview(frame)
+        self.mediaPlayer.setPosition(position)
     
     def toggle_play(self):
         """Toggle video playback"""
-        if self.is_playing:
-            self.video_timer.stop()
-            self.play_button.setText("Play")
+        if self.mediaPlayer.state() == QMediaPlayer.PlayingState:
+            self.mediaPlayer.pause()
         else:
-            self.video_timer.start(33)  # ~30 fps
-            self.play_button.setText("Pause")
-        
-        self.is_playing = not self.is_playing
+            # If we're at or past the trim end, reset to trim start
+            if self.mediaPlayer.position() >= self.trim_end_ms:
+                self.mediaPlayer.setPosition(self.trim_start_ms)
+            self.mediaPlayer.play()
     
-    def update_video_frame(self):
-        """Update the video frame during playback"""
-        if not self.cap or not self.is_playing:
-            return
-            
-        # If we've reached the end, restart from the beginning
-        if self.current_position >= self.trim_end_ms:
-            self.current_position = self.trim_start_ms
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, int((self.trim_start_ms / 1000.0) * self.fps))
+    def position_changed(self, position):
+        """Handle QMediaPlayer position changes"""
+        # Update slider
+        self.position_slider.setValue(position)
+        self.update_position_label(position, self.mediaPlayer.duration())
         
-        # Read the next frame
-        ret, frame = self.cap.read()
-        if not ret:
-            self.toggle_play()  # Stop playing if we can't read a frame
-            return
-            
-        # Convert frame to RGB
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # Update the video preview
-        self.update_video_preview(frame)
-        
-        # Update position
-        self.current_position += int(1000 / self.fps)
-        self.position_slider.setValue(self.current_position)
-        self.update_position_label(self.current_position, self.duration_ms)
+        # Handle trim points
+        if position >= self.trim_end_ms:
+            self.mediaPlayer.pause()
+            self.mediaPlayer.setPosition(self.trim_start_ms)
+            # Can automatically restart from trim start
+            # self.mediaPlayer.play()
+    
+    def duration_changed(self, duration):
+        """Handle QMediaPlayer duration changes"""
+        self.position_slider.setRange(0, duration)
+        self.update_position_label(self.mediaPlayer.position(), duration)
     
     def update_position_label(self, position, duration):
         """Update the position/duration label"""
@@ -509,20 +471,36 @@ class VideoExtractorWidget(QWidget):
         duration_str = ms_to_str(duration)
         self.position_label.setText(f"{position_str} / {duration_str}")
     
-    def set_current_frame_to_preview(self):
-        """Set the current frame from the video player as the preview frame"""
-        if not self.video_path or not self.cap:
-            return
+    def get_frame_at_position(self, position_ms):
+        """Get a frame at specified position using OpenCV"""
+        if not self.cap or not self.video_path:
+            return None
             
-        # Get the current frame based on position
-        frame_position = int((self.current_position / 1000.0) * self.fps)
+        # Convert position from ms to frame number
+        frame_pos = int((position_ms / 1000.0) * self.fps)
         
         # Seek to the position and read the frame
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_position)
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
         ret, frame = self.cap.read()
         
         if ret:
+            # Convert BGR to RGB
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            return frame
+        return None
+    
+    def set_current_frame_to_preview(self):
+        """Set the current frame from the video player as the preview frame"""
+        if not self.video_path:
+            return
+            
+        # Get current position from QMediaPlayer
+        position_ms = self.mediaPlayer.position()
+        
+        # Get frame using OpenCV
+        frame = self.get_frame_at_position(position_ms)
+        
+        if frame is not None:
             self.preview_frame = frame.copy()
             # Apply effects for preview
             self.update_preview()
@@ -663,9 +641,24 @@ class VideoExtractorWidget(QWidget):
             
     def closeEvent(self, event):
         """Clean up resources when widget is closed"""
+        # Cleanup OpenCV resources
         if self.cap:
             self.cap.release()
+        
+        # Cleanup QMediaPlayer
+        self.mediaPlayer.stop()
+        
         super().closeEvent(event)
+
+    def media_state_changed(self, state):
+        """Handle QMediaPlayer state changes"""
+        if state == QMediaPlayer.PlayingState:
+            self.play_button.setText("Pause")
+        else:
+            self.play_button.setText("Play")
+        
+        # Show overlay icon in video widget
+        self.videoWidget.showOverlayIcon(state)
 
 
 if __name__ == "__main__":
