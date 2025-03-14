@@ -98,6 +98,12 @@ class MediaImporterWidget(QWidget):
         self.btnVideos.setCheckable(True)
         self.btnVideos.clicked.connect(self.switch_to_videos)
         modeLayout.addWidget(self.btnVideos)
+        
+        # Добавляем кнопку обновления
+        refresh_btn = QPushButton("Обновить список")
+        refresh_btn.clicked.connect(self.refresh_list)
+        modeLayout.addWidget(refresh_btn)
+        
         mainLayout.addLayout(modeLayout)
 
         # Виджет для отображения миниатюр (в виде плитки)
@@ -316,19 +322,79 @@ class MediaImporterWidget(QWidget):
 
     def copy_annotation(self, item: QListWidgetItem):
         media_item = item.data(Qt.UserRole)
-        if media_item.annotation is None:
-            QMessageBox.information(self, "Информация", "У выбранного файла нет разметки для копирования")
+        if media_item.media_type != "image":
+            QMessageBox.information(self, "Информация", "Копирование разметки поддерживается только для изображений")
             return
-        self.copied_annotation = media_item.annotation
-        QMessageBox.information(self, "Копирование", "Разметка скопирована")
+            
+        # Ищем главное окно приложения, чтобы получить доступ к ImageViewer
+        main_window = self.get_main_window()
+        if not main_window or not hasattr(main_window, 'image_viewer'):
+            QMessageBox.warning(self, "Предупреждение", "Не удалось получить доступ к ImageViewer")
+            return
+            
+        # Получаем AnnotationManager из ImageViewer
+        annotation_manager = main_window.image_viewer.annotation_manager
+        if not annotation_manager:
+            QMessageBox.warning(self, "Предупреждение", "Не удалось получить доступ к AnnotationManager")
+            return
+            
+        # Проверяем, есть ли аннотации для выбранного изображения
+        file_path = media_item.file_path
+        if file_path not in annotation_manager.annotations_by_image or not annotation_manager.annotations_by_image[file_path]:
+            QMessageBox.information(self, "Информация", "У выбранного изображения нет разметки для копирования")
+            return
+            
+        # Копируем разметку
+        self.copied_annotation = {
+            'source_file': file_path,
+            'annotations': annotation_manager.annotations_by_image[file_path]
+        }
+        
+        QMessageBox.information(self, "Копирование", f"Разметка скопирована из {os.path.basename(file_path)}")
 
     def paste_annotation(self, item: QListWidgetItem):
         if self.copied_annotation is None:
+            QMessageBox.information(self, "Информация", "Нет скопированной разметки")
             return
+            
         media_item = item.data(Qt.UserRole)
-        media_item.annotation = self.copied_annotation
-        QMessageBox.information(self, "Вставка", "Разметка вставлена")
-        self.refresh_list()
+        if media_item.media_type != "image":
+            QMessageBox.information(self, "Информация", "Вставка разметки поддерживается только для изображений")
+            return
+            
+        # Ищем главное окно приложения, чтобы получить доступ к ImageViewer
+        main_window = self.get_main_window()
+        if not main_window or not hasattr(main_window, 'image_viewer'):
+            QMessageBox.warning(self, "Предупреждение", "Не удалось получить доступ к ImageViewer")
+            return
+            
+        # Получаем AnnotationManager из ImageViewer
+        annotation_manager = main_window.image_viewer.annotation_manager
+        if not annotation_manager:
+            QMessageBox.warning(self, "Предупреждение", "Не удалось получить доступ к AnnotationManager")
+            return
+            
+        # Вставляем аннотации в целевое изображение
+        target_file = media_item.file_path
+        annotation_manager.annotations_by_image[target_file] = self.copied_annotation['annotations']
+        
+        # Если это изображение сейчас открыто в ImageViewer, обновляем его отображение
+        if main_window.image_viewer.current_image_path == target_file:
+            main_window.image_viewer.load_annotations_for_image(target_file)
+            
+        source_file = os.path.basename(self.copied_annotation['source_file'])
+        target_file = os.path.basename(target_file)
+        QMessageBox.information(self, "Вставка", f"Разметка из {source_file} вставлена в {target_file}")
+        
+    def get_main_window(self):
+        """Получает ссылку на главное окно приложения"""
+        parent = self.parent()
+        while parent is not None:
+            # Проверяем, имеет ли родитель атрибуты, характерные для главного окна
+            if hasattr(parent, 'image_viewer') and hasattr(parent, 'media_importer'):
+                return parent
+            parent = parent.parent()
+        return None
 
 if __name__ == "__main__":
     import sys
