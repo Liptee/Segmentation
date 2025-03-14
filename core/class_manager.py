@@ -9,7 +9,7 @@ class SegmentationClassManager:
     - Добавление и удаление классов.
     - Присвоение/изменение цвета классов.
     - Добавление описания к классам.
-    - Экспорт меток в JSON файл.
+    - Экспорт и импорт меток в/из JSON файла.
     - Слияние (мердж) классов.
     """
     def __init__(self):
@@ -46,6 +46,54 @@ class SegmentationClassManager:
     def export_to_json(self, file_path: str) -> None:
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(list(self.classes.values()), f, ensure_ascii=False, indent=4)
+            
+    def import_from_json(self, file_path: str) -> tuple:
+        """
+        Импортирует классы из JSON файла
+        
+        Args:
+            file_path: путь к JSON файлу
+            
+        Returns:
+            tuple: (количество новых классов, количество обновленных классов)
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            if not isinstance(data, list):
+                raise ValueError("Неверный формат JSON: ожидается список классов")
+            
+            imported = 0
+            updated = 0
+            existing_classes = set(self.classes.keys())
+            
+            for item in data:
+                if not isinstance(item, dict) or 'name' not in item or 'color' not in item:
+                    continue
+                
+                name = item['name']
+                color = item['color']
+                description = item.get('description', '')
+                
+                if name in existing_classes:
+                    # Обновляем существующий класс
+                    self.update_class_color(name, color)
+                    self.update_class_description(name, description)
+                    updated += 1
+                else:
+                    # Добавляем новый класс
+                    try:
+                        self.add_class(name, color, description)
+                        imported += 1
+                    except ValueError:
+                        # Пропускаем классы с дублирующимися именами
+                        pass
+            
+            return imported, updated
+            
+        except Exception as e:
+            raise ValueError(f"Ошибка при импорте классов: {str(e)}")
 
     def merge_classes(self, class_names: list, target_class_name: str,
                       target_color: str = None, target_description: str = None) -> None:

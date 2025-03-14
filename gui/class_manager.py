@@ -1,10 +1,12 @@
 import sys
+import json
+import os
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QTextEdit, QListWidget, QListWidgetItem,
     QPushButton, QLabel, QApplication, QMessageBox, QFileDialog, QInputDialog, QDialog, QColorDialog, QDialogButtonBox
 )
-from PyQt5.QtGui import QPixmap, QPainter, QBrush, QColor, QIcon
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QPixmap, QPainter, QBrush, QColor, QIcon, QDragEnterEvent, QDropEvent
+from PyQt5.QtCore import Qt, pyqtSignal, QUrl
 from core.class_manager import SegmentationClassManager
 from logger import logger
 
@@ -186,10 +188,17 @@ class SegmentationClassManagerWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.manager = SegmentationClassManager()
+        self.setAcceptDrops(True)  # Разрешаем Drag & Drop
         self.init_ui()
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
+
+        # Добавим хинт о возможности перетаскивания JSON файла
+        drag_hint = QLabel("Перетащите JSON-файл для импорта классов")
+        drag_hint.setAlignment(Qt.AlignCenter)
+        drag_hint.setStyleSheet("color: gray; font-style: italic;")
+        main_layout.addWidget(drag_hint)
 
         self.classListWidget = QListWidget()
         self.classListWidget.setSelectionMode(QListWidget.ExtendedSelection)
@@ -212,16 +221,77 @@ class SegmentationClassManagerWidget(QWidget):
         self.mergeButton.clicked.connect(self.mergeSelected)
         btnLayout.addWidget(self.mergeButton)
 
+        # Кнопки экспорта и импорта
+        btnImportExportLayout = QHBoxLayout()
         self.exportButton = QPushButton("Экспорт в JSON")
         self.exportButton.clicked.connect(self.exportToJson)
-        btnLayout.addWidget(self.exportButton)
+        btnImportExportLayout.addWidget(self.exportButton)
+        
+        self.importButton = QPushButton("Импорт из JSON")
+        self.importButton.clicked.connect(self.importFromJson)
+        btnImportExportLayout.addWidget(self.importButton)
 
         main_layout.addLayout(btnLayout)
+        main_layout.addLayout(btnImportExportLayout)
 
         self.setLayout(main_layout)
         self.setWindowTitle("Менеджер классов сегментации")
         self.resize(600, 400)
         self.refreshList()
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """Обработка события перетаскивания файла над виджетом"""
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            # Проверяем, что перетаскивается только один файл и это JSON
+            if len(urls) == 1 and urls[0].toLocalFile().lower().endswith('.json'):
+                event.acceptProposedAction()
+                return
+        # По умолчанию отклоняем
+        event.ignore()
+
+    def dropEvent(self, event: QDropEvent):
+        """Обработка события сброса файла на виджет"""
+        urls = event.mimeData().urls()
+        if urls:
+            file_path = urls[0].toLocalFile()
+            if file_path.lower().endswith('.json'):
+                self.importJsonClasses(file_path)
+                event.acceptProposedAction()
+            else:
+                QMessageBox.warning(self, "Ошибка", "Поддерживаются только JSON файлы.")
+                event.ignore()
+
+    def importFromJson(self):
+        """Импорт классов из JSON файла через диалог выбора файла"""
+        file_path, _ = QFileDialog.getOpenFileName(self, "Импорт классов из JSON", "", "JSON файлы (*.json)")
+        if file_path:
+            self.importJsonClasses(file_path)
+    
+    def importJsonClasses(self, file_path):
+        """Импорт классов из JSON файла"""
+        try:
+            # Используем метод import_from_json из SegmentationClassManager
+            imported_classes, updated_classes = self.manager.import_from_json(file_path)
+            
+            # Для каждого обновленного класса нужно отправить сигнал об обновлении
+            # Но мы не знаем, какие именно классы были обновлены, так что
+            # просто инициируем общий сигнал об изменениях
+            if imported_classes > 0 or updated_classes > 0:
+                # Обновляем список и уведомляем об изменениях
+                self.refreshList()
+                self.classesChanged.emit()
+            
+            # Показываем сообщение об успешном импорте
+            if imported_classes > 0 or updated_classes > 0:
+                message = f"Импортировано {imported_classes} новых и обновлено {updated_classes} существующих классов из {file_path}"
+                QMessageBox.information(self, "Импорт завершен", message)
+            else:
+                QMessageBox.information(self, "Импорт завершен", "Нет новых классов для импорта")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка при импорте", f"Не удалось импортировать классы: {str(e)}")
+            logger.error(f"Ошибка при импорте классов: {str(e)}")
 
     def refreshList(self):
         self.classListWidget.clear()
