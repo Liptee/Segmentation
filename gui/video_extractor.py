@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QPixmap, QImage
 
+from gui.utils import convert_np_to_qimage
 from logger import logger
 from core.effects import (
     SaveEveryNFrameEffect,
@@ -18,6 +19,8 @@ from core.effects import (
     ChangeResolutionEffect,
     ChangeScaleEffect
 )
+
+
 class EffectListWidget(QListWidget):
     """Widget for displaying and managing a list of effects"""
     effectDoubleClicked = pyqtSignal(int)  # Signal emitted when an effect is double-clicked
@@ -83,14 +86,9 @@ class FramePreviewWidget(QLabel):
             self.setText("No preview available")
             return
             
-        # Convert the frame to QImage and then to QPixmap
-        height, width, channel = frame.shape
-        bytes_per_line = 3 * width
-        # Convert NumPy array to bytes for QImage
-        frame_data = frame.tobytes()
-        q_img = QImage(frame_data, width, height, bytes_per_line, QImage.Format_RGB888)
+        q_img = convert_np_to_qimage(frame)
         pixmap = QPixmap.fromImage(q_img)
-        
+
         # Scale the pixmap to fit the label while maintaining aspect ratio
         scaled_pixmap = pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.setPixmap(scaled_pixmap)
@@ -441,7 +439,7 @@ class VideoExtractorWidget(QWidget):
             return
             
         # Convert frame to QImage and QPixmap
-        q_img = self.convert_np_to_qimage(frame)
+        q_img = convert_np_to_qimage(frame)
         if q_img:
             pixmap = QPixmap.fromImage(q_img)
             scaled_pixmap = pixmap.scaled(
@@ -677,18 +675,6 @@ class VideoExtractorWidget(QWidget):
             self.cap.release()
         super().closeEvent(event)
 
-    @staticmethod
-    def convert_np_to_qimage(np_array):
-        """Convert a numpy array to QImage"""
-        if np_array is None:
-            return None
-        height, width, channels = np_array.shape
-        assert channels == 3, "Ожидается массив с 3 каналами (RGB)"
-        bytes_per_line = width * 3
-        # Convert NumPy array to bytes for QImage
-        frame_data = np_array.tobytes()
-        image = QImage(frame_data, width, height, bytes_per_line, QImage.Format_RGB888)
-        return image.copy()
 
 if __name__ == "__main__":
     import sys
