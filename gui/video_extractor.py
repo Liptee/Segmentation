@@ -6,8 +6,8 @@ from PyQt5.QtWidgets import (
     QProgressBar, QListWidget, QListWidgetItem,
     QSplitter, QFileDialog, QMessageBox, QDialog,  QSizePolicy
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QUrl
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QUrl, QRect
+from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QColor
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from gui.video_player import ClickableVideoWidget
 from gui.utils import convert_np_to_qimage, ms_to_str
@@ -107,75 +107,221 @@ class FramePreviewWidget(QLabel):
             self.setPixmap(scaled_pixmap)
         super().resizeEvent(event)
 
-class TrimSlider(QWidget):
-    """Custom slider widget with trim points for selecting video segments"""
-    trimPointsChanged = pyqtSignal(int, int)  # start, end in milliseconds
+class UnifiedVideoSlider(QWidget):
+    """Custom slider widget that shows current position, trim start and trim end on a single control"""
+    # Signals
+    positionChanged = pyqtSignal(int)  # Current position changed (ms)
+    trimPointsChanged = pyqtSignal(int, int)  # Trim start and end points changed (ms)
+    
+    # Constants for handle types
+    POSITION_HANDLE = 0
+    START_HANDLE = 1
+    END_HANDLE = 2
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(50)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Slider values
+        self.duration = 1000  # Default duration in ms
+        self.position = 0     # Current position in ms
+        self.start_trim = 0   # Trim start in ms
+        self.end_trim = 1000  # Trim end in ms
         
-        # Main slider for current position
-        self.position_slider = QSlider(Qt.Horizontal)
-        self.position_slider.setRange(0, 0)
+        # UI state
+        self.handle_radius = 8
+        self.slider_height = 10
+        self.active_handle = None
+        self.hover_handle = None
+        self.hover_pos = None
+        self.dragging = False
         
-        # Trim point sliders
-        self.start_slider = QSlider(Qt.Horizontal)
-        self.start_slider.setRange(0, 0)
-        self.start_slider.setStyleSheet("QSlider::handle { background: green; }")
-        
-        self.end_slider = QSlider(Qt.Horizontal)
-        self.end_slider.setRange(0, 0)
-        self.end_slider.setStyleSheet("QSlider::handle { background: red; }")
-        
-        layout.addWidget(self.position_slider)
-        
-        trim_layout = QHBoxLayout()
-        trim_layout.addWidget(QLabel("Start:"))
-        trim_layout.addWidget(self.start_slider)
-        trim_layout.addWidget(QLabel("End:"))
-        trim_layout.addWidget(self.end_slider)
-        layout.addLayout(trim_layout)
-        
-        # Connect signals
-        self.start_slider.valueChanged.connect(self._emit_trim_points)
-        self.end_slider.valueChanged.connect(self._emit_trim_points)
-        
+        # Enable mouse tracking for hover effects
+        self.setMouseTracking(True)
+    
     def set_range(self, min_value, max_value):
-        """Set the range for all sliders"""
-        self.position_slider.setRange(min_value, max_value)
-        self.start_slider.setRange(min_value, max_value)
-        self.end_slider.setRange(min_value, max_value)
-        
-        # Set default trim points to full range
-        self.start_slider.setValue(min_value)
-        self.end_slider.setValue(max_value)
+        """Set the range for the slider"""
+        self.start_trim = min_value
+        self.end_trim = max_value
+        self.duration = max_value
+        self.update()
         
     def set_position(self, position):
-        """Set the current position slider value"""
-        self.position_slider.setValue(position)
+        """Set the current position value"""
+        if position != self.position:
+            self.position = max(0, min(position, self.duration))
+            self.update()
+    
+    def set_trim_points(self, start, end):
+        """Set the trim start and end points"""
+        if start > end:
+            start, end = end, start
+            
+        self.start_trim = max(0, min(start, self.duration))
+        self.end_trim = max(0, min(end, self.duration))
+        self.update()
         
     def get_trim_points(self):
         """Get the current trim points"""
-        return self.start_slider.value(), self.end_slider.value()
+        return self.start_trim, self.end_trim
+    
+    def paintEvent(self, event):
+        """Draw the custom slider and handles"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
         
-    def _emit_trim_points(self):
-        """Emit signal when trim points change"""
-        start = self.start_slider.value()
-        end = self.end_slider.value()
+        # Calculate dimensions
+        width = self.width()
+        height = self.height()
+        slider_y = (height - self.slider_height) // 2
         
-        # Ensure start <= end
-        if start > end:
-            if self.sender() == self.start_slider:
-                self.end_slider.setValue(start)
-            else:
-                self.start_slider.setValue(end)
-            start, end = self.get_trim_points()
+        # Draw the slider track
+        track_rect = QRect(self.handle_radius, slider_y, 
+                            width - 2 * self.handle_radius, self.slider_height)
+        
+        # Draw background track
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(80, 80, 80))  # Dark gray for background
+        painter.drawRoundedRect(track_rect, 4, 4)
+        
+        # Draw the highlighted area between trim points
+        if self.start_trim < self.end_trim:
+            start_x = self._value_to_position(self.start_trim)
+            end_x = self._value_to_position(self.end_trim)
             
-        self.trimPointsChanged.emit(start, end)
+            highlight_rect = QRect(start_x, slider_y, end_x - start_x, self.slider_height)
+            painter.setBrush(QColor(120, 120, 220))  # Blue for active range
+            painter.drawRoundedRect(highlight_rect, 2, 2)
+        
+        # Draw the position handle (gray dot)
+        pos_x = self._value_to_position(self.position)
+        painter.setPen(QPen(Qt.darkGray, 1))
+        painter.setBrush(QColor(180, 180, 180))  # Gray
+        pos_rect = QRect(pos_x - self.handle_radius, slider_y + self.slider_height//2 - self.handle_radius,
+                         self.handle_radius*2, self.handle_radius*2)
+        painter.drawEllipse(pos_rect)
+        
+        # Draw the trim start handle (black vertical rectangle)
+        start_x = self._value_to_position(self.start_trim)
+        start_rect = QRect(start_x - 3, slider_y - 5, 6, self.slider_height + 10)
+        painter.setPen(QPen(Qt.black, 1))
+        painter.setBrush(QColor(0, 0, 0))  # Black
+        painter.drawRect(start_rect)
+        
+        # Draw the trim end handle (white vertical rectangle)
+        end_x = self._value_to_position(self.end_trim)
+        end_rect = QRect(end_x - 3, slider_y - 5, 6, self.slider_height + 10)
+        painter.setPen(QPen(Qt.black, 1))
+        painter.setBrush(QColor(255, 255, 255))  # White
+        painter.drawRect(end_rect)
+        
+        # Draw hover effect
+        if self.hover_handle is not None and not self.dragging:
+            painter.setPen(QPen(QColor(255, 255, 0), 2))  # Yellow highlight
+            if self.hover_handle == self.POSITION_HANDLE:
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(pos_rect.adjusted(-2, -2, 2, 2))
+            elif self.hover_handle == self.START_HANDLE:
+                painter.drawRect(start_rect.adjusted(-2, -2, 2, 2))
+            elif self.hover_handle == self.END_HANDLE:
+                painter.drawRect(end_rect.adjusted(-2, -2, 2, 2))
+    
+    def _value_to_position(self, value):
+        """Convert a value in ms to an x position on the slider"""
+        width = self.width() - 2 * self.handle_radius
+        if self.duration <= 0:
+            return self.handle_radius
+        ratio = value / self.duration
+        return int(self.handle_radius + ratio * width)
+    
+    def _position_to_value(self, pos):
+        """Convert an x position on the slider to a value in ms"""
+        width = self.width() - 2 * self.handle_radius
+        adjusted_pos = max(0, min(width, pos - self.handle_radius))
+        ratio = adjusted_pos / width
+        return int(ratio * self.duration)
+    
+    def _get_handle_at_position(self, pos):
+        """Determine which handle is at the given position"""
+        pos_x = self._value_to_position(self.position)
+        start_x = self._value_to_position(self.start_trim)
+        end_x = self._value_to_position(self.end_trim)
+        
+        # Check which handle is closest to the click position, prioritizing the one under cursor
+        distances = [
+            (abs(pos.x() - pos_x), self.POSITION_HANDLE),
+            (abs(pos.x() - start_x), self.START_HANDLE),
+            (abs(pos.x() - end_x), self.END_HANDLE)
+        ]
+        
+        # Sort by distance
+        distances.sort(key=lambda x: x[0])
+        
+        # If within the hover threshold, return the handle
+        if distances[0][0] <= self.handle_radius * 2:
+            return distances[0][1]
+        
+        return None
+    
+    def mousePressEvent(self, event):
+        """Handle mouse press events to start dragging"""
+        if event.button() == Qt.LeftButton:
+            self.active_handle = self._get_handle_at_position(event.pos())
+            if self.active_handle is not None:
+                self.dragging = True
+                # If no specific handle was clicked, move the position
+                if self.active_handle is None:
+                    self.active_handle = self.POSITION_HANDLE
+                    new_pos = self._position_to_value(event.pos().x())
+                    self.set_position(new_pos)
+                    self.positionChanged.emit(self.position)
+            else:
+                # If clicked elsewhere on the slider, move position directly
+                new_pos = self._position_to_value(event.pos().x())
+                self.set_position(new_pos)
+                self.positionChanged.emit(self.position)
+                
+        super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Handle mouse move events for dragging and hover effects"""
+        if self.dragging and self.active_handle is not None:
+            value = self._position_to_value(event.pos().x())
+            
+            if self.active_handle == self.POSITION_HANDLE:
+                self.set_position(value)
+                self.positionChanged.emit(self.position)
+            elif self.active_handle == self.START_HANDLE:
+                self.start_trim = min(value, self.end_trim)
+                self.trimPointsChanged.emit(self.start_trim, self.end_trim)
+                self.update()
+            elif self.active_handle == self.END_HANDLE:
+                self.end_trim = max(value, self.start_trim)
+                self.trimPointsChanged.emit(self.start_trim, self.end_trim)
+                self.update()
+        else:
+            # Update hover state
+            self.hover_handle = self._get_handle_at_position(event.pos())
+            self.hover_pos = event.pos()
+            self.update()
+            
+        super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release events to stop dragging"""
+        if event.button() == Qt.LeftButton and self.dragging:
+            self.dragging = False
+            self.active_handle = None
+            
+        super().mouseReleaseEvent(event)
+    
+    def leaveEvent(self, event):
+        """Handle mouse leave events to clear hover state"""
+        self.hover_handle = None
+        self.hover_pos = None
+        self.update()
+        super().leaveEvent(event)
 
 class VideoExtractorWidget(QWidget):
     """Main widget for extracting frames from videos with effects"""
@@ -225,27 +371,23 @@ class VideoExtractorWidget(QWidget):
         self.mediaPlayer.durationChanged.connect(self.duration_changed)
         self.mediaPlayer.stateChanged.connect(self.media_state_changed)
         
-        # Add trim slider 
-        self.trim_slider = TrimSlider()
-        self.trim_slider.trimPointsChanged.connect(self.on_trim_points_changed)
-        video_layout.addWidget(self.trim_slider)
+        # Add unified video slider (combines position and trim controls)
+        self.unified_slider = UnifiedVideoSlider()
+        self.unified_slider.positionChanged.connect(self.set_position)
+        self.unified_slider.trimPointsChanged.connect(self.on_trim_points_changed)
+        video_layout.addWidget(self.unified_slider)
         
-        # Add video position slider
-        position_layout = QHBoxLayout()
-        self.position_slider = QSlider(Qt.Horizontal)
-        self.position_slider.setRange(0, 0)
-        self.position_slider.sliderMoved.connect(self.set_position)
-        
+        # Player controls
+        controls_layout = QHBoxLayout()
         self.play_button = QPushButton("Play")
         self.play_button.clicked.connect(self.toggle_play)
         self.play_button.setMaximumWidth(60)
         
         self.position_label = QLabel("00:00 / 00:00")
         
-        position_layout.addWidget(self.play_button)
-        position_layout.addWidget(self.position_slider)
-        position_layout.addWidget(self.position_label)
-        video_layout.addLayout(position_layout)
+        controls_layout.addWidget(self.play_button)
+        controls_layout.addWidget(self.position_label)
+        video_layout.addLayout(controls_layout)
         
         # Add "Set to Preview" button
         self.set_preview_btn = QPushButton("Set to Preview")
@@ -370,13 +512,12 @@ class VideoExtractorWidget(QWidget):
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         self.duration_ms = int(self.frame_count * 1000 / self.fps) if self.fps > 0 else 0
         
-        # Update trim slider ranges
-        self.trim_slider.set_range(0, self.duration_ms)
+        # Update unified slider range
+        self.unified_slider.set_range(0, self.duration_ms)
         self.trim_start_ms = 0
         self.trim_end_ms = self.duration_ms
         
         # Reset position
-        self.position_slider.setValue(0)
         self.update_position_label(0, self.duration_ms)
         
         # Load first frame for preview
@@ -432,6 +573,11 @@ class VideoExtractorWidget(QWidget):
         """Handle changes to trim points"""
         self.trim_start_ms = start_ms
         self.trim_end_ms = end_ms
+        
+        # If current position is outside the trim range, reset it
+        current_pos = self.mediaPlayer.position()
+        if current_pos < start_ms or current_pos > end_ms:
+            self.mediaPlayer.setPosition(start_ms)
     
     def set_position(self, position):
         """Set the video position in milliseconds"""
@@ -449,8 +595,8 @@ class VideoExtractorWidget(QWidget):
     
     def position_changed(self, position):
         """Handle QMediaPlayer position changes"""
-        # Update slider
-        self.position_slider.setValue(position)
+        # Update unified slider
+        self.unified_slider.set_position(position)
         self.update_position_label(position, self.mediaPlayer.duration())
         
         # Handle trim points
@@ -462,7 +608,7 @@ class VideoExtractorWidget(QWidget):
     
     def duration_changed(self, duration):
         """Handle QMediaPlayer duration changes"""
-        self.position_slider.setRange(0, duration)
+        self.unified_slider.set_range(0, duration)
         self.update_position_label(self.mediaPlayer.position(), duration)
     
     def update_position_label(self, position, duration):
@@ -626,6 +772,9 @@ class VideoExtractorWidget(QWidget):
             self.progress_bar.setVisible(False)
             self.extract_btn.setEnabled(True)
             
+            # Emit signal with extracted frame paths
+            self.framesExtracted.emit(extracted_frames)
+            
             # Show message
             QMessageBox.information(
                 self, 
@@ -633,12 +782,50 @@ class VideoExtractorWidget(QWidget):
                 f"Extracted {len(extracted_frames)} frames to {output_subdir}"
             )
             
-            # Emit signal with extracted frame paths
-            self.framesExtracted.emit(extracted_frames)
+            # Import frames to MediaImporter if not already connected
+            self.import_to_media_importer(extracted_frames)
         
         # Start the extraction process
         QTimer.singleShot(0, extract_batch)
+    
+    def import_to_media_importer(self, frame_paths):
+        """Import extracted frames to MediaImporter if possible"""
+        if not frame_paths:
+            return
             
+        # Check if we're running as a standalone app or from within the media_importer
+        from gui.media_importer import MediaImporterWidget
+        
+        # Look for a MediaImporterWidget in the parent chain
+        parent = self.parent()
+        media_importer = None
+        
+        # Try to find MediaImporterWidget in parent chain
+        while parent:
+            if isinstance(parent, MediaImporterWidget):
+                media_importer = parent
+                break
+            parent = parent.parent()
+            
+        # If we're running standalone or media_importer not found in parent chain
+        if media_importer is None:
+            # In PyQt5 we can't directly check if signal has receivers
+            # Instead, we'll create a new MediaImporter to show the extracted frames
+            # if we're running standalone
+            
+            # Check if this is likely a standalone run (windowTitle would be set in this case)
+            if "Extractor" in self.windowTitle():
+                # Create a temporary media importer to show the extracted frames
+                media_importer = MediaImporterWidget()
+                media_importer.setWindowTitle("Extracted Frames")
+                media_importer.resize(800, 600)
+                
+                # Import the frames
+                media_importer.import_extracted_frames(frame_paths)
+                
+                # Show the media importer
+                media_importer.show()
+    
     def closeEvent(self, event):
         """Clean up resources when widget is closed"""
         # Cleanup OpenCV resources

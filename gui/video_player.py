@@ -110,7 +110,6 @@ class VideoPlayer(QWidget):
         self.videoProbe = QVideoProbe(self)
         self.current_frame = None
 
-        self.playlist = []      
         self.currentIndex = -1  
         self.frame_duration = 40  # 40 мс, ~25 fps
         self.current_video_path = None  # Добавляем переменную для отслеживания текущего пути к видео
