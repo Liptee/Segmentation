@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QStackedWidget, QApplication
+    QStackedWidget, QApplication, QMenuBar, QMenu, QAction
 )
 from PyQt5.QtCore import Qt, QSize, pyqtSlot
 
@@ -8,6 +8,7 @@ from gui.video_player import VideoPlayer
 from gui.class_manager import SegmentationClassManagerWidget
 from gui.media_importer import MediaImporterWidget
 from gui.image_viewer import ImageViewerWidget
+from gui.export_annotations import ExportAnnotationsDialog
 
 
 class MainWindow(QMainWindow):
@@ -21,6 +22,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Segmentation Tool")
         self.resize(1200, 800)  # Стартовый размер окна
+        
+        # Создаем меню бар
+        self.create_menu_bar()
         
         # Создаем центральный виджет
         central_widget = QWidget(self)
@@ -91,6 +95,44 @@ class MainWindow(QMainWindow):
         # Установка начального режима
         self.on_mode_changed(self.media_importer.mode)
     
+    def create_menu_bar(self):
+        """
+        Создает меню бар с пунктами 'Экспорт аннотаций' и 'Импорт аннотаций'
+        """
+        menu_bar = QMenuBar(self)
+        self.setMenuBar(menu_bar)
+        
+        # Создаем меню
+        annotations_menu = QMenu("Аннотации", self)
+        menu_bar.addMenu(annotations_menu)
+        
+        # Создаем действия
+        export_action = QAction("Экспорт аннотаций", self)
+        import_action = QAction("Импорт аннотаций", self)
+        
+        # Добавляем действия в меню
+        annotations_menu.addAction(export_action)
+        annotations_menu.addAction(import_action)
+        
+        # Подключаем сигналы
+        export_action.triggered.connect(self.open_export_dialog)
+        import_action.triggered.connect(self.open_import_dialog)
+    
+    def open_export_dialog(self):
+        """
+        Открывает диалоговое окно экспорта аннотаций
+        """
+        export_dialog = ExportAnnotationsDialog(self)
+        export_dialog.exec_()
+    
+    def open_import_dialog(self):
+        """
+        Открывает диалоговое окно импорта аннотаций
+        Пока не реализовано
+        """
+        # Будет реализовано позже
+        pass
+
     @pyqtSlot(str, str)
     def on_media_selected(self, file_path, media_type):
         """
