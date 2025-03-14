@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QPixmap, QImage
 
-from gui.utils import convert_np_to_qimage
+from gui.utils import convert_np_to_qimage, ms_to_str
 from logger import logger
 from core.effects import (
     SaveEveryNFrameEffect,
@@ -505,17 +505,9 @@ class VideoExtractorWidget(QWidget):
     
     def update_position_label(self, position, duration):
         """Update the position/duration label"""
-        position_str = self.ms_to_str(position)
-        duration_str = self.ms_to_str(duration)
+        position_str = ms_to_str(position)
+        duration_str = ms_to_str(duration)
         self.position_label.setText(f"{position_str} / {duration_str}")
-    
-    @staticmethod
-    def ms_to_str(ms):
-        """Convert milliseconds to a time string (MM:SS)"""
-        seconds = ms // 1000
-        minutes = seconds // 60
-        seconds = seconds % 60
-        return f"{minutes:02d}:{seconds:02d}"
     
     def set_current_frame_to_preview(self):
         """Set the current frame from the video player as the preview frame"""

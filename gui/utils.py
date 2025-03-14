@@ -26,3 +26,10 @@ def convert_np_to_qimage(np_array):
     bytes_per_line = width * 3
     image = QImage(np_array.tobytes(), width, height, bytes_per_line, QImage.Format_RGB888)
     return image.copy()
+
+def ms_to_str(ms):
+    """Convert milliseconds to a time string (MM:SS)"""
+    seconds = ms // 1000
+    minutes = seconds // 60
+    seconds = seconds % 60
+    return f"{minutes:02d}:{seconds:02d}"

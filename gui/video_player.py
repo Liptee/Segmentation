@@ -1,5 +1,3 @@
-# gui/video_player.py
-
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSlider, QPushButton, QFileDialog, QLabel, QStyle, QSizePolicy,
     QMenu, QAction, QMessageBox, QShortcut
@@ -14,6 +12,8 @@ import tempfile
 import uuid
 import cv2
 from logger import logger
+
+from gui.utils import ms_to_str, convert_qimage_to_np
 
 class ClickableVideoWidget(QVideoWidget):
     clicked = pyqtSignal()
@@ -215,7 +215,7 @@ class VideoPlayer(QWidget):
             return True
             
         # Преобразуем QImage в NumPy массив для анализа
-        np_array = self.convert_qimage_to_np(qimage)
+        np_array = convert_qimage_to_np(qimage)
         if np_array is None:
             return True
             
@@ -314,38 +314,11 @@ class VideoPlayer(QWidget):
         self.update_duration_label(self.mediaPlayer.position(), duration)
 
     def update_duration_label(self, position, duration):
-        def ms_to_str(ms):
-            seconds = ms // 1000
-            minutes = seconds // 60
-            seconds = seconds % 60
-            return f"{minutes:02d}:{seconds:02d}"
         self.labelDuration.setText(f"{ms_to_str(position)} / {ms_to_str(duration)}")
 
     def handle_error(self):
         error_string = self.mediaPlayer.errorString()
         logger.info(f"VideoPlayer: Ошибка: {error_string}")
-
-    @staticmethod
-    def convert_qimage_to_np(qimage):
-        if qimage is None:
-            return None
-        image = qimage.convertToFormat(QImage.Format_RGB888)
-        width = image.width()
-        height = image.height()
-        ptr = image.bits()
-        ptr.setsize(height * width * 3)
-        arr = np.array(ptr).reshape(height, width, 3)
-        return arr
-
-    @staticmethod
-    def convert_np_to_qimage(np_array):
-        if np_array is None:
-            return None
-        height, width, channels = np_array.shape
-        assert channels == 3, "Ожидается массив с 3 каналами (RGB)"
-        bytes_per_line = width * 3
-        image = QImage(np_array.data, width, height, bytes_per_line, QImage.Format_RGB888)
-        return image.copy()
 
     def show_context_menu(self, pos):
         """Показывает контекстное меню с опциями для видеоплеера"""
