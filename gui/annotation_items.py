@@ -16,12 +16,13 @@ class ClassAnnotatableMixin:
     def get_default_color(self) -> QColor:
         """Возвращает цвет по умолчанию.
         (Returns the default color.)"""
+        return QColor("#7F7F7F")
         return QColor(255, 0, 0)  # Красный по умолчанию
 
     def get_default_color_str(self) -> str:
         """Возвращает строковое представление цвета по умолчанию.
         (Returns the default color as a string.)"""
-        return "#FF0000"
+        return "#7F7F7F"
 
     def get_default_alpha(self) -> int:
         """Возвращает уровень прозрачности для заливки.
