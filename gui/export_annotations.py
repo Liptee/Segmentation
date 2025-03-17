@@ -22,13 +22,47 @@ class EffectWidget(QWidget):
         self.params = {}
         self.mode = "processing"  # "processing" или "augmentation"
         
+        # Удаляем жесткие стили, чтобы использовать системные цвета
+        self.setStyleSheet("""
+            QWidget {
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+            }
+            QLabel {
+                border: none;
+            }
+            QComboBox, QPushButton, QSlider, QCheckBox {
+                border: 1px solid palette(mid);
+                border-radius: 2px;
+            }
+        """)
+        
         # Создание UI
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
         
-        # Заголовок с именем эффекта
+        # Заголовок с именем эффекта и кнопкой удаления
         title_layout = QHBoxLayout()
+        # Метка режима (справа от названия)
+        mode_layout = QHBoxLayout()
+        mode_layout.setContentsMargins(0, 0, 0, 0)
+        mode_layout.setSpacing(5)
+        
         self.title_label = QLabel(name)
-        title_layout.addWidget(self.title_label)
+        self.title_label.setStyleSheet("font-weight: bold;")
+        mode_layout.addWidget(self.title_label)
+        
+        # Индикатор режима
+        self.mode_indicator = QLabel("")
+        self.mode_indicator.setFixedSize(8, 8)
+        self.mode_indicator.setStyleSheet("""
+            background-color: palette(dark);
+            border-radius: 4px;
+        """)
+        mode_layout.addWidget(self.mode_indicator)
+        mode_layout.addStretch()
+        
+        title_layout.addLayout(mode_layout, 1)
         
         # Режим эффекта
         self.mode_combo = QComboBox()
@@ -36,18 +70,35 @@ class EffectWidget(QWidget):
         self.mode_combo.currentIndexChanged.connect(self.on_mode_changed)
         title_layout.addWidget(self.mode_combo)
         
+        # Кнопка удаления
+        self.delete_btn = QPushButton("×")
+        self.delete_btn.setMaximumWidth(25)
+        self.delete_btn.setToolTip("Удалить эффект")
+        title_layout.addWidget(self.delete_btn)
+        
         layout.addLayout(title_layout)
+        
+        # Добавляем разделитель
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(separator)
         
         # Контейнер для параметров эффекта
         self.params_container = QWidget()
+        self.params_container.setStyleSheet("border: none;")
         self.params_layout = QVBoxLayout(self.params_container)
+        self.params_layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.params_container)
         
         # Контейнер для вероятности (только для аугментации)
         self.probability_container = QWidget()
+        self.probability_container.setStyleSheet("border: none;")
         self.probability_container.setVisible(False)
         prob_layout = QHBoxLayout(self.probability_container)
-        prob_layout.addWidget(QLabel("Вероятность:"))
+        prob_layout.setContentsMargins(0, 5, 0, 0)
+        prob_label = QLabel("Вероятность:")
+        prob_layout.addWidget(prob_label)
         self.probability_slider = QSlider(Qt.Horizontal)
         self.probability_slider.setRange(0, 100)
         self.probability_slider.setValue(50)
@@ -55,15 +106,44 @@ class EffectWidget(QWidget):
         self.probability_slider.setTickInterval(10)
         prob_layout.addWidget(self.probability_slider)
         self.probability_label = QLabel("50%")
+        self.probability_label.setMinimumWidth(30)
         prob_layout.addWidget(self.probability_label)
         self.probability_slider.valueChanged.connect(self.on_probability_changed)
         
         layout.addWidget(self.probability_container)
+        
+        # Установка начального состояния индикатора режима
+        self.update_mode_indicator("processing")
+        
+        # Установка минимальной высоты для предотвращения обрезания
+        self.setMinimumHeight(100)
+    
+    def update_mode_indicator(self, mode):
+        """Обновляет индикатор режима"""
+        if mode == "augmentation":
+            self.mode_indicator.setStyleSheet("background-color: #4CAF50; border-radius: 4px;")  # Зеленый для аугментации
+            self.mode_indicator.setToolTip("Режим аугментации")
+        else:
+            self.mode_indicator.setStyleSheet("background-color: #2196F3; border-radius: 4px;")  # Синий для обработки
+            self.mode_indicator.setToolTip("Режим обработки")
     
     def on_mode_changed(self, index):
         self.mode = "augmentation" if index == 1 else "processing"
         self.probability_container.setVisible(self.mode == "augmentation")
         self.params["mode"] = self.mode
+        
+        # Обновляем индикатор режима
+        self.update_mode_indicator(self.mode)
+        
+        # Динамически изменяем размер, чтобы учесть новую высоту
+        self.updateGeometry()
+        if self.parent() and hasattr(self.parent(), 'parent') and self.parent().parent():
+            # Найдем соответствующий QListWidgetItem
+            list_widget = self.parent().parent()
+            for i in range(list_widget.count()):
+                if list_widget.itemWidget(list_widget.item(i)) == self:
+                    list_widget.item(i).setSizeHint(self.sizeHint())
+                    break
     
     def on_probability_changed(self, value):
         self.probability_label.setText(f"{value}%")
@@ -79,6 +159,13 @@ class EffectWidget(QWidget):
             "probability": self.params.get("probability", 50) if self.mode == "augmentation" else None,
             "params": self.params
         }
+
+    def sizeHint(self):
+        base_size = super().sizeHint()
+        # Если в режиме аугментации, добавляем высоту для probability_container
+        if self.mode == "augmentation" and self.probability_container.isVisible():
+            base_size.setHeight(base_size.height() + 50)
+        return base_size
 
 
 class FlipEffect(EffectWidget):
@@ -197,6 +284,26 @@ class EffectListWidget(QListWidget):
         super().__init__(parent)
         self.setDragDropMode(QListWidget.InternalMove)
         self.setSelectionMode(QListWidget.SingleSelection)
+        self.setSpacing(5)  # Добавляем отступы между элементами
+        
+        # Обновляем стили для соответствия системной теме
+        self.setStyleSheet("""
+            QListWidget {
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QListWidget::item {
+                margin-bottom: 4px;
+            }
+            QListWidget::item:selected {
+                background-color: palette(highlight);
+                color: palette(highlighted-text);
+            }
+        """)
+        
+        # Включаем обработку клавиш Delete и Backspace
+        self.installEventFilter(self)
         
     def add_effect(self, effect_widget):
         """
@@ -206,6 +313,44 @@ class EffectListWidget(QListWidget):
         item.setSizeHint(effect_widget.sizeHint())
         self.addItem(item)
         self.setItemWidget(item, effect_widget)
+        
+        # Подключаем кнопку удаления эффекта
+        effect_widget.delete_btn.clicked.connect(lambda: self.remove_selected_effect(item))
+    
+    def remove_selected_effect(self, item=None):
+        """
+        Удаляет выбранный эффект из списка
+        """
+        if item is None:
+            # Если элемент не передан, используем текущий выделенный
+            current_items = self.selectedItems()
+            if not current_items:
+                return
+                
+            item = current_items[0]
+        
+        # Получаем индекс выбранного элемента
+        row = self.row(item)
+        if row >= 0:
+            # Удаляем элемент из списка
+            self.takeItem(row)
+    
+    def clear_all_effects(self):
+        """
+        Удаляет все эффекты из списка
+        """
+        self.clear()
+    
+    def eventFilter(self, obj, event):
+        """
+        Обработчик событий для перехвата клавиш Delete и Backspace
+        """
+        if obj == self and event.type() == event.KeyPress:
+            if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+                self.remove_selected_effect()
+                return True
+        
+        return super().eventFilter(obj, event)
     
     def get_effects(self):
         """
@@ -243,6 +388,19 @@ class AvailableEffectsWidget(QWidget):
         layout.addWidget(flip_btn)
         layout.addWidget(rotation_btn)
         layout.addWidget(brightness_btn)
+        
+        # Добавляем разделитель
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(separator)
+        
+        # Кнопка очистки пайплайна
+        clear_btn = QPushButton("Очистить пайплайн")
+        clear_btn.setToolTip("Удалить все эффекты из пайплайна")
+        clear_btn.clicked.connect(self.pipeline_widget.clear_all_effects)
+        layout.addWidget(clear_btn)
+        
         layout.addStretch()
     
     def add_effect_to_pipeline(self, effect_class):
@@ -350,7 +508,46 @@ class ExportAnnotationsDialog(QDialog):
         # Левая часть: пайплайн эффектов
         pipeline_container = QWidget()
         pipeline_layout = QVBoxLayout(pipeline_container)
-        pipeline_layout.addWidget(QLabel("Пайплайн обработки"))
+        
+        pipeline_header = QHBoxLayout()
+        pipeline_header.addWidget(QLabel("<b>Пайплайн обработки</b>"))
+        
+        # Индикаторы режимов
+        indicators_layout = QHBoxLayout()
+        indicators_layout.setSpacing(15)
+        
+        processing_indicator = QWidget()
+        processing_layout = QHBoxLayout(processing_indicator)
+        processing_layout.setContentsMargins(0, 0, 0, 0)
+        processing_layout.setSpacing(5)
+        processing_dot = QLabel()
+        processing_dot.setFixedSize(10, 10)
+        processing_dot.setStyleSheet("background-color: #2196F3; border-radius: 5px;") 
+        processing_layout.addWidget(processing_dot)
+        processing_layout.addWidget(QLabel("Обработка"))
+        indicators_layout.addWidget(processing_indicator)
+        
+        augmentation_indicator = QWidget()
+        augmentation_layout = QHBoxLayout(augmentation_indicator)
+        augmentation_layout.setContentsMargins(0, 0, 0, 0) 
+        augmentation_layout.setSpacing(5)
+        augmentation_dot = QLabel()
+        augmentation_dot.setFixedSize(10, 10)
+        augmentation_dot.setStyleSheet("background-color: #4CAF50; border-radius: 5px;")
+        augmentation_layout.addWidget(augmentation_dot)
+        augmentation_layout.addWidget(QLabel("Аугментация"))
+        indicators_layout.addWidget(augmentation_indicator)
+        
+        indicators_layout.addStretch()
+        
+        pipeline_header.addLayout(indicators_layout)
+        pipeline_layout.addLayout(pipeline_header)
+        
+        # Добавляем подсказку для пользователя
+        hint_label = QLabel("Перетаскивайте эффекты для изменения порядка. Удаляйте с помощью кнопки 'x' или клавиши Delete.")
+        hint_label.setStyleSheet("color: palette(mid); font-size: 10px;")
+        hint_label.setWordWrap(True)
+        pipeline_layout.addWidget(hint_label)
         
         self.pipeline_list = EffectListWidget()
         pipeline_layout.addWidget(self.pipeline_list)
