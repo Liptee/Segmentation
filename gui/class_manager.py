@@ -467,3 +467,62 @@ class SegmentationClassManagerWidget(QWidget):
                 return parent
             parent = parent.parent()
         return None
+
+    def clear_classes(self):
+        """
+        Очищает все существующие классы.
+        Используется при импорте новых классов для замены существующих.
+        """
+        # Получаем список всех имен классов
+        class_names = list(self.manager.classes.keys())
+        
+        # Получаем основное окно для доступа к annotation_manager
+        main_window = self.get_main_window()
+        if main_window and hasattr(main_window, 'image_viewer') and hasattr(main_window.image_viewer, 'annotation_manager'):
+            annotation_manager = main_window.image_viewer.annotation_manager
+            
+            # Обновляем аннотации для каждого класса
+            for name in class_names:
+                annotation_manager.remove_class(name)
+                # Отправляем сигнал об удалении класса
+                self.classRemoved.emit(name)
+        
+        # Очищаем словарь классов
+        self.manager.classes.clear()
+        
+        # Обновляем список в UI
+        self.refreshList()
+        
+        # Отправляем сигнал об изменении списка классов
+        self.classesChanged.emit()
+        
+        logger.info(f"ClassManager: Очищены все классы")
+
+    def add_class(self, class_id, class_name, color):
+        """
+        Добавляет новый класс с указанным ID, именем и цветом.
+        Игнорирует class_id, используя только имя и цвет.
+        Используется при импорте классов.
+        
+        :param class_id: ID класса (игнорируется)
+        :param class_name: Имя класса
+        :param color: Цвет класса (QColor или строка)
+        """
+        try:
+            # Преобразуем QColor в строковый формат, если нужно
+            color_str = color
+            if hasattr(color, 'name'):
+                color_str = color.name()
+            
+            # Добавляем класс через менеджер
+            self.manager.add_class(class_name, color_str, "")
+            
+            # Обновляем список в UI
+            self.refreshList()
+            
+            # Отправляем сигнал об изменении списка классов
+            self.classesChanged.emit()
+            
+            logger.info(f"ClassManager: Добавлен класс {class_name} с цветом {color_str}")
+        except ValueError as e:
+            logger.error(f"Ошибка при добавлении класса {class_name}: {str(e)}")

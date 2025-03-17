@@ -778,16 +778,6 @@ class ExportThread(QThread):
                     self.export_finished.emit(False, "Нет классов в аннотациях")
                     return
                 
-                # Создаем data.yaml
-                data_yaml = {
-                    'path': export_dir,
-                    'train': os.path.join('train', 'images'),
-                    'val': os.path.join('val', 'images'),
-                    'test': os.path.join('test', 'images'),
-                    'nc': len(classes),
-                    'names': list(classes.keys())
-                }
-                
                 with open(os.path.join(export_dir, 'data.yaml'), 'w') as f:
                     f.write("path: " + export_dir + "\n")
                     f.write("train: train/images\n")

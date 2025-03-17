@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QStackedWidget, QApplication, QMenuBar, QMenu, QAction
+    QStackedWidget, QApplication, QMenuBar, QMenu, QAction, QMessageBox
 )
 from PyQt5.QtCore import Qt, QSize, pyqtSlot
 
@@ -9,6 +9,7 @@ from gui.class_manager import SegmentationClassManagerWidget
 from gui.media_importer import MediaImporterWidget
 from gui.image_viewer import ImageViewerWidget
 from gui.export_annotations import ExportAnnotationsDialog
+from gui.import_annotations import ImportAnnotationsDialog
 
 
 class MainWindow(QMainWindow):
@@ -128,10 +129,14 @@ class MainWindow(QMainWindow):
     def open_import_dialog(self):
         """
         Открывает диалоговое окно импорта аннотаций
-        Пока не реализовано
         """
-        # Будет реализовано позже
-        pass
+        try:
+            import_dialog = ImportAnnotationsDialog(self)
+            import_dialog.exec_()
+        except Exception as e:
+            from logger import logger
+            logger.error(f"Ошибка при открытии диалога импорта: {str(e)}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось открыть диалог импорта: {str(e)}")
 
     @pyqtSlot(str, str)
     def on_media_selected(self, file_path, media_type):
