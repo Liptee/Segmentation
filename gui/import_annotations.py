@@ -257,46 +257,34 @@ class ImportAnnotationsDialog(QDialog):
     def validate_json(self):
         """
         Проверяет структуру JSON-файла с классами
+        Структура JSON-файла:
+        [
+            {
+                "name": "class_name",
+                "color": "color_hex"
+                "description": "description_text"
+            },
+            {
+                "name": "class_name",
+                "color": "color_hex"
+                "description": "description_text"
+            },
+            
+        ]
         """
         try:
             with open(self.json_path, 'r', encoding='utf-8') as f:
                 json_data = json.load(f)
             
-            # Проверяем наличие структуры классов в JSON
-            if 'version' not in json_data:
-                self.json_status_label.setText("Предупреждение: JSON-файл не содержит версии формата")
-                self.json_status_label.setStyleSheet("color: orange;")
-                return True
+            for item in json_data:
+                if 'name' in item and 'color' in item and 'description' in item:
+                    self.json_status_label.setText(f"JSON-файл валиден. Найдено классов: {len(json_data)}")
+                    self.json_status_label.setStyleSheet("color: green;")
+                    return True
             
-            if 'images' not in json_data:
-                self.json_status_label.setText("Предупреждение: JSON-файл не содержит раздела 'images'")
-                self.json_status_label.setStyleSheet("color: orange;")
-                return True
-            
-            # Проверяем наличие классов и цветов в аннотациях
-            classes = set()
-            has_colors = False
-            
-            for img_path, annotations in json_data['images'].items():
-                for ann in annotations:
-                    if 'class' in ann and ann['class'].get('name'):
-                        classes.add(ann['class']['name'])
-                        if ann['class'].get('color'):
-                            has_colors = True
-            
-            if not classes:
-                self.json_status_label.setText("Предупреждение: Не найдены классы в JSON-файле")
-                self.json_status_label.setStyleSheet("color: orange;")
-                return True
-            
-            status_text = f"JSON-файл валиден. Найдено классов: {len(classes)}"
-            if has_colors:
-                status_text += " (с цветами)"
-            
-            self.json_status_label.setText(status_text)
-            self.json_status_label.setStyleSheet("color: green;")
-            return True
-            
+            self.json_status_label.setText("Предупреждение: Не найдены классы в JSON-файле")
+
+        
         except Exception as e:
             self.json_status_label.setText(f"Ошибка при чтении JSON-файла: {str(e)}")
             self.json_status_label.setStyleSheet("color: red;")
@@ -772,14 +760,11 @@ class ImportHelper:
             
             # Генерируем случайные цвета для классов из YAML
             class_colors = {}
-            
-            for class_name in yaml_classes:
-                # Генерируем случайный цвет
-                r, g, b = random.randint(50, 200), random.randint(50, 200), random.randint(50, 200)
-                class_colors[class_name] = QColor(r, g, b)
+        
             
             # Если есть JSON, загружаем из него классы и цвета
             if self.json_path:
+                print("Here")
                 progress_callback(5, "Загрузка классов из JSON...")
                 
                 try:
@@ -789,37 +774,23 @@ class ImportHelper:
                     json_classes = {}
                     
                     # Собираем информацию о классах из аннотаций в JSON
-                    for img_path, annotations in json_data.get('images', {}).items():
-                        for ann in annotations:
-                            if 'class' in ann and ann['class'].get('name'):
-                                class_name = ann['class']['name']
-                                color_str = ann['class'].get('color')
-                                
-                                if class_name and color_str and class_name not in json_classes:
-                                    try:
-                                        color = QColor(color_str)
-                                        json_classes[class_name] = color
-                                    except:
-                                        # Если не удалось преобразовать строку в цвет, используем случайный
-                                        r, g, b = random.randint(50, 200), random.randint(50, 200), random.randint(50, 200)
-                                        json_classes[class_name] = QColor(r, g, b)
-                    
-                    # Проверяем конфликты и приоритеты классов
-                    for json_class_name, json_color in json_classes.items():
-                        if json_class_name in yaml_classes:
-                            # Конфликт имен - приоритет имеет YAML, но цвет берем из JSON
-                            class_colors[json_class_name] = json_color
-                            # Сохраняем информацию о конфликте
-                            self.class_conflicts[json_class_name] = json_class_name
+                    for class_info in  json_data:
+                        if class_info['name'] not in yaml_classes:
+                            yaml_classes.append(class_info['name'])
+                            class_colors[class_info['name']] = QColor(class_info['color'])
                         else:
-                            # Уникальный класс из JSON - добавляем его и цвет
-                            yaml_classes.append(json_class_name)
-                            class_colors[json_class_name] = json_color
+                            class_colors[class_info['name']] = QColor(class_info['color'])
                     
                 except Exception as e:
                     logger.error(f"Ошибка при чтении JSON-файла: {str(e)}")
                     # Продолжаем импорт, но без данных из JSON
             
+            else:
+                for class_name in yaml_classes:
+                    # Генерируем случайный цвет
+                    r, g, b = random.randint(50, 200), random.randint(50, 200), random.randint(50, 200)
+                    class_colors[class_name] = QColor(r, g, b)
+
             # Получаем список изображений для импорта из всех выбранных папок
             image_files = []
             for folder in self.selected_folders:
