@@ -3,10 +3,10 @@ import hashlib
 import cv2
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget, QListWidgetItem,
-    QLabel, QFileDialog, QMessageBox, QMenu, QAction
+    QLabel, QFileDialog, QMessageBox, QMenu, QAction, QGroupBox, QCheckBox, QFrame
 )
 from PyQt5.QtGui import QPixmap, QImage, QIcon, QPainter, QBrush, QColor, QDragEnterEvent, QDropEvent, QPen
-from PyQt5.QtCore import Qt, QSize, pyqtSignal
+from PyQt5.QtCore import Qt, QSize, pyqtSignal, QTimer
 
 # Поддерживаемые расширения
 SUPPORTED_IMAGE_EXT = ('.png', '.jpg', '.jpeg', '.bmp')
@@ -161,7 +161,10 @@ class MediaImporterWidget(QWidget):
         
         mainLayout.addLayout(modeLayout)
 
-        # Виджет для отображения миниатюр (в виде плитки)
+        # Создаем горизонтальный layout для основной области (миниатюры + фильтры)
+        contentLayout = QHBoxLayout()
+        
+        # Виджет для отображения миниатюр (в виде плитки) - слева
         self.listWidget = QListWidget()
         self.listWidget.setViewMode(QListWidget.IconMode)
         self.listWidget.setIconSize(QSize(THUMB_SIZE, THUMB_SIZE))
@@ -172,7 +175,90 @@ class MediaImporterWidget(QWidget):
         self.listWidget.itemClicked.connect(self.on_item_clicked)
         self.listWidget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.listWidget.customContextMenuRequested.connect(self.show_context_menu)
-        mainLayout.addWidget(self.listWidget)
+        contentLayout.addWidget(self.listWidget, 3)  # 3/4 пространства для миниатюр
+
+        # Панель фильтров (только для изображений) - справа
+        self.filters_group = QGroupBox("Фильтры")
+        self.filters_group.setMaximumWidth(300)  # Ограничиваем ширину панели фильтров
+        filters_layout = QVBoxLayout(self.filters_group)
+        
+        # Фильтры по статусу аннотаций
+        annotation_filters_layout = QVBoxLayout()  # Изменено на вертикальный для экономии места
+        annotation_filters_layout.addWidget(QLabel("<b>Статус разметки:</b>"))
+        
+        self.filter_no_annotations = QCheckBox("Нет разметки")
+        self.filter_no_annotations.setChecked(True)
+        self.filter_no_annotations.stateChanged.connect(self.on_filter_changed)
+        annotation_filters_layout.addWidget(self.filter_no_annotations)
+        
+        self.filter_incomplete_annotations = QCheckBox("Есть метки без класса")
+        self.filter_incomplete_annotations.setChecked(True)
+        self.filter_incomplete_annotations.stateChanged.connect(self.on_filter_changed)
+        annotation_filters_layout.addWidget(self.filter_incomplete_annotations)
+        
+        self.filter_complete_annotations = QCheckBox("Валидная разметка")
+        self.filter_complete_annotations.setChecked(True)
+        self.filter_complete_annotations.stateChanged.connect(self.on_filter_changed)
+        annotation_filters_layout.addWidget(self.filter_complete_annotations)
+        
+        filters_layout.addLayout(annotation_filters_layout)
+        
+        # Разделитель
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        filters_layout.addWidget(separator)
+        
+        # Фильтры по типам выборки
+        dataset_filters_layout = QVBoxLayout()  # Изменено на вертикальный для экономии места
+        dataset_filters_layout.addWidget(QLabel("<b>Тип выборки:</b>"))
+        
+        self.filter_train_dataset = QCheckBox("Обучающая (О)")
+        self.filter_train_dataset.setChecked(True)
+        self.filter_train_dataset.stateChanged.connect(self.on_filter_changed)
+        dataset_filters_layout.addWidget(self.filter_train_dataset)
+        
+        self.filter_val_dataset = QCheckBox("Валидационная (В)")
+        self.filter_val_dataset.setChecked(True)
+        self.filter_val_dataset.stateChanged.connect(self.on_filter_changed)
+        dataset_filters_layout.addWidget(self.filter_val_dataset)
+        
+        self.filter_test_dataset = QCheckBox("Тестовая (Т)")
+        self.filter_test_dataset.setChecked(True)
+        self.filter_test_dataset.stateChanged.connect(self.on_filter_changed)
+        dataset_filters_layout.addWidget(self.filter_test_dataset)
+        
+        self.filter_none_dataset = QCheckBox("Нет выборки (Н)")
+        self.filter_none_dataset.setChecked(True)
+        self.filter_none_dataset.stateChanged.connect(self.on_filter_changed)
+        dataset_filters_layout.addWidget(self.filter_none_dataset)
+        
+        filters_layout.addLayout(dataset_filters_layout)
+        
+        # Разделитель
+        separator2 = QFrame()
+        separator2.setFrameShape(QFrame.HLine)
+        separator2.setFrameShadow(QFrame.Sunken)
+        filters_layout.addWidget(separator2)
+        
+        # Кнопки быстрого управления фильтрами
+        filter_buttons_layout = QVBoxLayout()  # Изменено на вертикальный
+        select_all_btn = QPushButton("Выбрать все")
+        select_all_btn.clicked.connect(self.select_all_filters)
+        filter_buttons_layout.addWidget(select_all_btn)
+        
+        deselect_all_btn = QPushButton("Снять все")
+        deselect_all_btn.clicked.connect(self.deselect_all_filters)
+        filter_buttons_layout.addWidget(deselect_all_btn)
+        
+        filters_layout.addLayout(filter_buttons_layout)
+        
+        # Добавляем растяжку в конец панели фильтров
+        filters_layout.addStretch()
+        
+        contentLayout.addWidget(self.filters_group, 1)  # 1/4 пространства для фильтров
+        
+        mainLayout.addLayout(contentLayout)
 
         # Панель кнопок импорта (перемещена под список)
         btnLayout = QHBoxLayout()
@@ -195,6 +281,8 @@ class MediaImporterWidget(QWidget):
         self.mode = "image"
         self.btnImages.setChecked(True)
         self.btnVideos.setChecked(False)
+        # Показываем панель фильтров для изображений
+        self.filters_group.setVisible(True)
         self.refresh_list()
         # Отправляем сигнал об изменении режима
         self.modeChanged.emit(self.mode)
@@ -203,6 +291,8 @@ class MediaImporterWidget(QWidget):
         self.mode = "video"
         self.btnVideos.setChecked(True)
         self.btnImages.setChecked(False)
+        # Скрываем панель фильтров для видео
+        self.filters_group.setVisible(False)
         self.refresh_list()
         # Отправляем сигнал об изменении режима
         self.modeChanged.emit(self.mode)
@@ -319,23 +409,36 @@ class MediaImporterWidget(QWidget):
         if main_window and hasattr(main_window, 'image_viewer') and hasattr(main_window.image_viewer, 'annotation_manager'):
             annotation_manager = main_window.image_viewer.annotation_manager
         
+        filtered_count = 0
+        total_count = len(self.imported_items[self.mode])
+        
         for item in self.imported_items[self.mode]:
-            list_item = QListWidgetItem()
+            # Определяем статус аннотации для изображений
+            annotation_status = "none"
+            if item.media_type == "image" and annotation_manager:
+                annotation_status = annotation_manager.get_image_annotation_status(item.file_path)
             
-            if item.media_type == "image":
-                # Определяем статус аннотации
-                annotation_status = "none"
-                if annotation_manager:
-                    annotation_status = annotation_manager.get_image_annotation_status(item.file_path)
+            # Проверяем фильтрацию
+            if self.item_passes_filter(item, annotation_status):
+                filtered_count += 1
+                list_item = QListWidgetItem()
                 
-                thumb = self.get_cached_thumbnail(item.file_path, annotation_status, item.dataset_type, item.media_type)
+                if item.media_type == "image":
+                    thumb = self.get_cached_thumbnail(item.file_path, annotation_status, item.dataset_type, item.media_type)
+                else:
+                    thumb = self.get_cached_thumbnail(item.file_path, "none", "none", item.media_type)
+                    
+                list_item.setIcon(QIcon(thumb))
+                list_item.setText(os.path.basename(item.file_path))
+                list_item.setData(Qt.UserRole, item)
+                self.listWidget.addItem(list_item)
+        
+        # Обновляем заголовок группы фильтров с информацией о количестве
+        if self.mode == "image":
+            if total_count > 0:
+                self.filters_group.setTitle(f"Фильтры (показано: {filtered_count} из {total_count})")
             else:
-                thumb = self.get_cached_thumbnail(item.file_path, "none", "none", item.media_type)
-                
-            list_item.setIcon(QIcon(thumb))
-            list_item.setText(os.path.basename(item.file_path))
-            list_item.setData(Qt.UserRole, item)
-            self.listWidget.addItem(list_item)
+                self.filters_group.setTitle("Фильтры")
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
@@ -588,6 +691,111 @@ class MediaImporterWidget(QWidget):
     def clear_thumbnail_cache(self):
         """Очищает кэш миниатюр"""
         self.thumbnail_cache.clear()
+
+    def on_filter_changed(self):
+        """Обработчик изменения фильтров"""
+        # Используем таймер для отложенного обновления, чтобы избежать множественных обновлений
+        if not hasattr(self, '_filter_timer'):
+            self._filter_timer = QTimer()
+            self._filter_timer.setSingleShot(True)
+            self._filter_timer.timeout.connect(self.refresh_list)
+        
+        # Отменяем предыдущий таймер и запускаем новый
+        self._filter_timer.stop()
+        self._filter_timer.start(100)  # 100 мс задержка
+
+    def select_all_filters(self):
+        """Выбирает все фильтры"""
+        # Временно отключаем сигналы чтобы избежать множественных обновлений
+        self.filter_no_annotations.blockSignals(True)
+        self.filter_incomplete_annotations.blockSignals(True)
+        self.filter_complete_annotations.blockSignals(True)
+        self.filter_train_dataset.blockSignals(True)
+        self.filter_val_dataset.blockSignals(True)
+        self.filter_test_dataset.blockSignals(True)
+        self.filter_none_dataset.blockSignals(True)
+        
+        self.filter_no_annotations.setChecked(True)
+        self.filter_incomplete_annotations.setChecked(True)
+        self.filter_complete_annotations.setChecked(True)
+        self.filter_train_dataset.setChecked(True)
+        self.filter_val_dataset.setChecked(True)
+        self.filter_test_dataset.setChecked(True)
+        self.filter_none_dataset.setChecked(True)
+        
+        # Включаем сигналы обратно
+        self.filter_no_annotations.blockSignals(False)
+        self.filter_incomplete_annotations.blockSignals(False)
+        self.filter_complete_annotations.blockSignals(False)
+        self.filter_train_dataset.blockSignals(False)
+        self.filter_val_dataset.blockSignals(False)
+        self.filter_test_dataset.blockSignals(False)
+        self.filter_none_dataset.blockSignals(False)
+        
+        # Обновляем список один раз
+        self.refresh_list()
+
+    def deselect_all_filters(self):
+        """Снимает все фильтры"""
+        # Временно отключаем сигналы чтобы избежать множественных обновлений
+        self.filter_no_annotations.blockSignals(True)
+        self.filter_incomplete_annotations.blockSignals(True)
+        self.filter_complete_annotations.blockSignals(True)
+        self.filter_train_dataset.blockSignals(True)
+        self.filter_val_dataset.blockSignals(True)
+        self.filter_test_dataset.blockSignals(True)
+        self.filter_none_dataset.blockSignals(True)
+        
+        self.filter_no_annotations.setChecked(False)
+        self.filter_incomplete_annotations.setChecked(False)
+        self.filter_complete_annotations.setChecked(False)
+        self.filter_train_dataset.setChecked(False)
+        self.filter_val_dataset.setChecked(False)
+        self.filter_test_dataset.setChecked(False)
+        self.filter_none_dataset.setChecked(False)
+        
+        # Включаем сигналы обратно
+        self.filter_no_annotations.blockSignals(False)
+        self.filter_incomplete_annotations.blockSignals(False)
+        self.filter_complete_annotations.blockSignals(False)
+        self.filter_train_dataset.blockSignals(False)
+        self.filter_val_dataset.blockSignals(False)
+        self.filter_test_dataset.blockSignals(False)
+        self.filter_none_dataset.blockSignals(False)
+        
+        # Обновляем список один раз
+        self.refresh_list()
+
+    def item_passes_filter(self, item, annotation_status):
+        """Проверяет, проходит ли элемент фильтрацию"""
+        # Для видео нет фильтрации
+        if item.media_type == "video":
+            return True
+        
+        # Проверяем фильтр по статусу аннотаций
+        annotation_filter_passed = False
+        if annotation_status == "none" and self.filter_no_annotations.isChecked():
+            annotation_filter_passed = True
+        elif annotation_status == "incomplete" and self.filter_incomplete_annotations.isChecked():
+            annotation_filter_passed = True
+        elif annotation_status == "complete" and self.filter_complete_annotations.isChecked():
+            annotation_filter_passed = True
+        
+        if not annotation_filter_passed:
+            return False
+        
+        # Проверяем фильтр по типу выборки
+        dataset_filter_passed = False
+        if item.dataset_type == "train" and self.filter_train_dataset.isChecked():
+            dataset_filter_passed = True
+        elif item.dataset_type == "val" and self.filter_val_dataset.isChecked():
+            dataset_filter_passed = True
+        elif item.dataset_type == "test" and self.filter_test_dataset.isChecked():
+            dataset_filter_passed = True
+        elif item.dataset_type == "none" and self.filter_none_dataset.isChecked():
+            dataset_filter_passed = True
+        
+        return dataset_filter_passed
 
 if __name__ == "__main__":
     import sys
