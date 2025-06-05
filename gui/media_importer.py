@@ -21,6 +21,7 @@ class MediaItem:
         self.media_type = media_type  # "image" или "video"
         self.annotation = None        # для разметки
         self.hash = None
+        self.dataset_type = "none"    # "train", "val", "test", "none"
 
     def compute_hash(self):
         if self.media_type != "image":
@@ -33,13 +34,14 @@ class MediaItem:
         except Exception:
             return None
 
-def generate_image_thumbnail(file_path, annotation_status="none"):
+def generate_image_thumbnail(file_path, annotation_status="none", dataset_type="none"):
     """
-    Генерирует миниатюру изображения с индикатором статуса аннотации
+    Генерирует миниатюру изображения с индикатором статуса аннотации и типа выборки
     
     Args:
         file_path: Путь к изображению
         annotation_status: Статус аннотации ('none', 'incomplete', 'complete')
+        dataset_type: Тип выборки ('train', 'val', 'test', 'none')
     """
     # Загружаем изображение через QPixmap и принудительно масштабируем до THUMB_SIZE×THUMB_SIZE
     pix = QPixmap(file_path)
@@ -50,11 +52,11 @@ def generate_image_thumbnail(file_path, annotation_status="none"):
         # Чтобы получить квадратную миниатюру без искажений, используем режим IgnoreAspectRatio
         pix = pix.scaled(THUMB_SIZE, THUMB_SIZE, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
     
-    # Добавляем индикатор статуса разметки
+    # Добавляем индикаторы
     painter = QPainter(pix)
     painter.setRenderHint(QPainter.Antialiasing)
     
-    # Выбираем цвет в зависимости от статуса
+    # Выбираем цвет в зависимости от статуса аннотации
     if annotation_status == "none":
         color = QColor(255, 0, 0)  # Красный - нет разметки
     elif annotation_status == "incomplete":
@@ -62,11 +64,35 @@ def generate_image_thumbnail(file_path, annotation_status="none"):
     else:  # "complete"
         color = QColor(0, 255, 0)  # Зеленый - валидная разметка
     
-    # Рисуем круг в левом нижнем углу
+    # Рисуем круг в левом нижнем углу (статус аннотации)
     circle_size = THUMB_SIZE // 8
     painter.setBrush(QBrush(color))
     painter.setPen(QPen(Qt.black, 1))
     painter.drawEllipse(5, THUMB_SIZE - circle_size - 5, circle_size, circle_size)
+    
+    # Добавляем индикатор типа выборки (буква в правом нижнем углу)
+    if dataset_type != "none":
+        dataset_letters = {"train": "О", "val": "В", "test": "Т", "none": "Н"}
+        letter = dataset_letters.get(dataset_type, "Н")
+        
+        # Настройки для текста
+        font = painter.font()
+        font.setPointSize(max(8, THUMB_SIZE // 15))
+        font.setBold(True)
+        painter.setFont(font)
+        
+        # Фон для буквы
+        text_rect_size = THUMB_SIZE // 6
+        text_x = THUMB_SIZE - text_rect_size - 5
+        text_y = THUMB_SIZE - text_rect_size - 5
+        
+        painter.setBrush(QBrush(QColor(255, 255, 255, 200)))  # Полупрозрачный белый фон
+        painter.setPen(QPen(Qt.black, 1))
+        painter.drawRect(text_x, text_y, text_rect_size, text_rect_size)
+        
+        # Рисуем букву
+        painter.setPen(QPen(Qt.black))
+        painter.drawText(text_x, text_y, text_rect_size, text_rect_size, Qt.AlignCenter, letter)
     
     painter.end()
     return pix
@@ -253,7 +279,7 @@ class MediaImporterWidget(QWidget):
                 if annotation_manager:
                     annotation_status = annotation_manager.get_image_annotation_status(item.file_path)
                 
-                thumb = generate_image_thumbnail(item.file_path, annotation_status)
+                thumb = generate_image_thumbnail(item.file_path, annotation_status, item.dataset_type)
             else:
                 thumb = generate_video_thumbnail(item.file_path)
                 
@@ -307,14 +333,45 @@ class MediaImporterWidget(QWidget):
             extract_frames_action.triggered.connect(lambda: self.open_video_extractor(media_item.file_path))
             menu.addAction(extract_frames_action)
         
-        copy_action = QAction("Копировать разметку", self)
-        copy_action.triggered.connect(lambda: self.copy_annotation(item))
-        menu.addAction(copy_action)
-        
-        if self.copied_annotation is not None:
-            paste_action = QAction("Вставить разметку", self)
-            paste_action.triggered.connect(lambda: self.paste_annotation(item))
-            menu.addAction(paste_action)
+        # Для изображений добавляем опции работы с разметкой и выборкой
+        if media_item.media_type == "image":
+            copy_action = QAction("Копировать разметку", self)
+            copy_action.triggered.connect(lambda: self.copy_annotation(item))
+            menu.addAction(copy_action)
+            
+            if self.copied_annotation is not None:
+                paste_action = QAction("Вставить разметку", self)
+                paste_action.triggered.connect(lambda: self.paste_annotation(item))
+                menu.addAction(paste_action)
+                
+            # Добавляем разделитель
+            menu.addSeparator()
+            
+            # Добавляем пункт изменения выборки
+            dataset_menu = QMenu("Изменить выборку", self)
+            
+            # Получаем выбранные элементы
+            selected_items = self.listWidget.selectedItems()
+            if not selected_items:
+                selected_items = [item]
+            
+            train_action = QAction("Обучающая (О)", self)
+            train_action.triggered.connect(lambda: self.change_dataset_type(selected_items, "train"))
+            dataset_menu.addAction(train_action)
+            
+            val_action = QAction("Валидационная (В)", self)
+            val_action.triggered.connect(lambda: self.change_dataset_type(selected_items, "val"))
+            dataset_menu.addAction(val_action)
+            
+            test_action = QAction("Тестовая (Т)", self)
+            test_action.triggered.connect(lambda: self.change_dataset_type(selected_items, "test"))
+            dataset_menu.addAction(test_action)
+            
+            none_action = QAction("Нет выборки (Н)", self)
+            none_action.triggered.connect(lambda: self.change_dataset_type(selected_items, "none"))
+            dataset_menu.addAction(none_action)
+            
+            menu.addMenu(dataset_menu)
             
         menu.exec_(self.listWidget.mapToGlobal(pos))
     
@@ -444,6 +501,16 @@ class MediaImporterWidget(QWidget):
                 return parent
             parent = parent.parent()
         return None
+
+    def change_dataset_type(self, items, dataset_type):
+        """Изменяет тип выборки для выбранных элементов"""
+        for item in items:
+            media_item = item.data(Qt.UserRole)
+            if media_item and media_item.media_type == "image":
+                media_item.dataset_type = dataset_type
+        
+        # Обновляем отображение
+        self.refresh_list()
 
 if __name__ == "__main__":
     import sys

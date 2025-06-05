@@ -462,6 +462,14 @@ class ExportAnnotationsDialog(QDialog):
         split_group = QGroupBox("Разбиение на выборки")
         split_layout = QVBoxLayout(split_group)
         
+        # Чекбокс для пользовательского разбиения
+        self.use_custom_split_checkbox = QCheckBox("Учитывать пользовательские разбиение выборок")
+        self.use_custom_split_checkbox.setToolTip("При включении этой опции изображения, которые помечены пользователем, "
+                                                 "будут точно отнесены в соответствующую выборку. "
+                                                 "Слайдеры будут применяться только к изображениям с маркировкой 'Нет выборки'")
+        self.use_custom_split_checkbox.stateChanged.connect(self.on_custom_split_changed)
+        split_layout.addWidget(self.use_custom_split_checkbox)
+        
         train_layout = QHBoxLayout()
         train_layout.addWidget(QLabel("Train:"))
         self.train_slider = QSlider(Qt.Horizontal)
@@ -618,6 +626,29 @@ class ExportAnnotationsDialog(QDialog):
         self.test_slider.setValue(test_value)
         self.test_label.setText(f"{test_value}%")
     
+    def on_custom_split_changed(self, state):
+        """
+        Обработчик изменения состояния чекбокса пользовательского разбиения
+        """
+        if state == Qt.Checked:
+            # При включении пользовательского разбиения показываем информацию
+            if hasattr(self.parent, 'media_importer'):
+                media_importer = self.parent.media_importer
+                # Подсчитываем количество изображений в каждой категории
+                train_count = sum(1 for item in media_importer.imported_items["image"] if item.dataset_type == "train")
+                val_count = sum(1 for item in media_importer.imported_items["image"] if item.dataset_type == "val")
+                test_count = sum(1 for item in media_importer.imported_items["image"] if item.dataset_type == "test")
+                none_count = sum(1 for item in media_importer.imported_items["image"] if item.dataset_type == "none")
+                
+                info_msg = (f"Пользовательская маркировка:\n"
+                           f"• Обучающие: {train_count} изображений\n"
+                           f"• Валидационные: {val_count} изображений\n"
+                           f"• Тестовые: {test_count} изображений\n"
+                           f"• Без маркировки: {none_count} изображений\n\n"
+                           f"Слайдеры будут применяться только к {none_count} изображениям без маркировки.")
+                
+                QMessageBox.information(self, "Пользовательское разбиение", info_msg)
+    
     def start_export(self):
         """
         Начинает процесс экспорта аннотаций
@@ -634,6 +665,7 @@ class ExportAnnotationsDialog(QDialog):
         val_ratio = self.val_slider.value() / 100.0
         test_ratio = self.test_slider.value() / 100.0
         effects = self.pipeline_list.get_effects()
+        use_custom_split = self.use_custom_split_checkbox.isChecked()
         
         # Создаем отдельный поток для экспорта
         self.export_thread = ExportThread(
@@ -643,7 +675,8 @@ class ExportAnnotationsDialog(QDialog):
             train_ratio, 
             val_ratio, 
             test_ratio, 
-            effects
+            effects,
+            use_custom_split
         )
         
         # Создаем диалог прогресса
@@ -703,7 +736,7 @@ class ExportThread(QThread):
     progress_updated = pyqtSignal(int, str)
     export_finished = pyqtSignal(bool, str)
     
-    def __init__(self, main_window, save_path, export_mode, train_ratio, val_ratio, test_ratio, effects):
+    def __init__(self, main_window, save_path, export_mode, train_ratio, val_ratio, test_ratio, effects, use_custom_split):
         super().__init__()
         self.main_window = main_window
         self.save_path = save_path
@@ -712,6 +745,7 @@ class ExportThread(QThread):
         self.val_ratio = val_ratio
         self.test_ratio = test_ratio
         self.effects = effects
+        self.use_custom_split = use_custom_split
     
     def run(self):
         """
@@ -752,18 +786,60 @@ class ExportThread(QThread):
                     self.export_finished.emit(False, "Нет аннотаций для экспорта")
                     return
                 
-                # Настройка сортировки для стабильного разделения на выборки
-                image_paths = sorted(list(all_annotations.keys()))
-                
-                # Определяем количество изображений для каждой выборки
-                train_count = int(total_images * self.train_ratio)
-                val_count = int(total_images * self.val_ratio)
-                test_count = total_images - train_count - val_count
-                
-                # Делим изображения на выборки
-                train_images = image_paths[:train_count]
-                val_images = image_paths[train_count:train_count + val_count]
-                test_images = image_paths[train_count + val_count:]
+                # Разделение изображений на выборки с учетом пользовательской маркировки
+                if self.use_custom_split and hasattr(self.main_window, 'media_importer'):
+                    # Используем пользовательскую маркировку из media_importer
+                    media_importer = self.main_window.media_importer
+                    
+                    # Создаем словарь для быстрого поиска dataset_type по пути к файлу
+                    dataset_types = {}
+                    for media_item in media_importer.imported_items["image"]:
+                        dataset_types[media_item.file_path] = media_item.dataset_type
+                    
+                    # Разделяем изображения согласно пользовательской маркировке
+                    train_images = []
+                    val_images = []
+                    test_images = []
+                    none_images = []
+                    
+                    for img_path in all_annotations.keys():
+                        dataset_type = dataset_types.get(img_path, "none")
+                        if dataset_type == "train":
+                            train_images.append(img_path)
+                        elif dataset_type == "val":
+                            val_images.append(img_path)
+                        elif dataset_type == "test":
+                            test_images.append(img_path)
+                        else:
+                            none_images.append(img_path)
+                    
+                    # Изображения без маркировки распределяем случайно согласно слайдерам
+                    if none_images:
+                        # Сортируем для стабильного разделения
+                        none_images.sort()
+                        none_count = len(none_images)
+                        
+                        none_train_count = int(none_count * self.train_ratio)
+                        none_val_count = int(none_count * self.val_ratio)
+                        none_test_count = none_count - none_train_count - none_val_count
+                        
+                        train_images.extend(none_images[:none_train_count])
+                        val_images.extend(none_images[none_train_count:none_train_count + none_val_count])
+                        test_images.extend(none_images[none_train_count + none_val_count:])
+                    
+                else:
+                    # Стандартное разбиение по слайдерам
+                    image_paths = sorted(list(all_annotations.keys()))
+                    
+                    # Определяем количество изображений для каждой выборки
+                    train_count = int(total_images * self.train_ratio)
+                    val_count = int(total_images * self.val_ratio)
+                    test_count = total_images - train_count - val_count
+                    
+                    # Делим изображения на выборки
+                    train_images = image_paths[:train_count]
+                    val_images = image_paths[train_count:train_count + val_count]
+                    test_images = image_paths[train_count + val_count:]
                 
                 # Создаем файл data.yaml с конфигурацией для YOLO
                 classes = {}

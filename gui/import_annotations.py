@@ -597,7 +597,7 @@ class ImportThread(QThread):
                     media_importer = self.main_window.media_importer
                     
                     # Перед обновлением списка, добавляем все импортированные файлы
-                    for i, (image_path, _) in enumerate(image_files):
+                    for i, (image_path, source_folder) in enumerate(image_files):
                         try:
                             # Получаем имя файла
                             image_name = os.path.basename(image_path)
@@ -609,6 +609,17 @@ class ImportThread(QThread):
                             if os.path.exists(target_image_path):
                                 # Импортируем файл в список media_importer
                                 media_importer.import_file(target_image_path)
+                                
+                                # Устанавливаем тип выборки на основе папки источника
+                                dataset_type_mapping = {"train": "train", "val": "val", "test": "test"}
+                                dataset_type = dataset_type_mapping.get(source_folder, "none")
+                                
+                                # Находим импортированный элемент и устанавливаем ему тип выборки
+                                for media_item in media_importer.imported_items["image"]:
+                                    if media_item.file_path == target_image_path:
+                                        media_item.dataset_type = dataset_type
+                                        break
+                                        
                         except Exception as e:
                             logger.error(f"Ошибка при добавлении {image_path} в media_importer: {str(e)}")
                     
@@ -866,7 +877,7 @@ class ImportHelper:
                     media_importer = self.main_window.media_importer
                     
                     # Перед обновлением списка, добавляем все импортированные файлы
-                    for i, (image_path, _) in enumerate(image_files):
+                    for i, (image_path, source_folder) in enumerate(image_files):
                         try:
                             # Получаем имя файла
                             image_name = os.path.basename(image_path)
@@ -878,6 +889,17 @@ class ImportHelper:
                             if os.path.exists(target_image_path):
                                 # Импортируем файл в список media_importer
                                 media_importer.import_file(target_image_path)
+                                
+                                # Устанавливаем тип выборки на основе папки источника
+                                dataset_type_mapping = {"train": "train", "val": "val", "test": "test"}
+                                dataset_type = dataset_type_mapping.get(source_folder, "none")
+                                
+                                # Находим импортированный элемент и устанавливаем ему тип выборки
+                                for media_item in media_importer.imported_items["image"]:
+                                    if media_item.file_path == target_image_path:
+                                        media_item.dataset_type = dataset_type
+                                        break
+                                        
                         except Exception as e:
                             logger.error(f"Ошибка при добавлении {image_path} в media_importer: {str(e)}")
                     
