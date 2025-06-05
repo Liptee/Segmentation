@@ -285,6 +285,11 @@ class ImageViewerWidget(QWidget):
         self.action_edit.setCheckable(True)
         self.action_edit.triggered.connect(lambda: self.set_tool_mode(self.MODE_EDIT))
         
+        # Добавляем кнопку "Пустая аннотация"
+        self.action_empty_annotation = QAction("Пустая аннотация", self)
+        self.action_empty_annotation.setToolTip("Удалить все аннотации и пометить изображение как валидно размеченное")
+        self.action_empty_annotation.triggered.connect(self.create_empty_annotation)
+        
         # Добавляем действия на панель инструментов
         self.toolbar.addAction(self.action_pan)
         self.toolbar.addAction(self.action_rect_select)
@@ -292,6 +297,12 @@ class ImageViewerWidget(QWidget):
         self.toolbar.addAction(self.action_edit)
         
         # Добавляем разделитель
+        self.toolbar.addSeparator()
+        
+        # Добавляем кнопку "Пустая аннотация"
+        self.toolbar.addAction(self.action_empty_annotation)
+        
+        # Добавляем еще один разделитель
         self.toolbar.addSeparator()
         
         # Устанавливаем политику размера для панели инструментов
@@ -1065,3 +1076,68 @@ class ImageViewerWidget(QWidget):
             logger.info(f"ImageViewer: Сохраняю {len(self.annotations)} аннотаций перед закрытием для {self.current_image_path}")
             self.save_current_annotations()
         super().closeEvent(event)
+
+    def create_empty_annotation(self):
+        """Создает пустую аннотацию для текущего изображения"""
+        if not self.current_image_path:
+            return
+            
+        logger.info(f"ImageViewer: Создаю пустую аннотацию для {self.current_image_path}")
+        
+        # Удаляем все аннотации с экрана
+        for item in self.scene.items():
+            if isinstance(item, (SelectableRectItem, SelectablePolygonItem)):
+                self.scene.removeItem(item)
+        self.annotations.clear()
+        
+        # Создаем специальную запись в annotation_manager для обозначения валидной пустой аннотации
+        # Добавляем специальную аннотацию типа "empty" с валидным классом
+        empty_annotation = {
+            'type': 'empty',
+            'class': {
+                'id': 'empty_valid',
+                'name': 'empty_valid',
+                'color': '#00FF00'  # Зеленый цвет для валидной разметки
+            }
+        }
+        
+        # Сохраняем пустую валидную аннотацию в annotation_manager
+        self.annotation_manager.annotations_by_image[self.current_image_path] = [empty_annotation]
+        
+        # НЕ вызываем on_annotation_changed(), так как он перезапишет нашу пустую аннотацию
+        # Вместо этого сразу обновляем миниатюры в MediaImporter
+        self.update_media_importer_thumbnails()
+        
+        logger.info(f"ImageViewer: Пустая валидная аннотация создана для {self.current_image_path}")
+        
+        # Показываем уведомление пользователю
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Пустая аннотация", 
+                               f"Изображение помечено как валидно размеченное (пустое)")
+
+    def update_media_importer_thumbnails(self):
+        """Обновляет миниатюры в MediaImporter для текущего изображения"""
+        # Получаем главное окно
+        main_window = self.get_main_window()
+        if main_window and hasattr(main_window, 'media_importer'):
+            media_importer = main_window.media_importer
+            
+            # Очищаем кэш миниатюр для текущего изображения
+            keys_to_remove = [key for key in media_importer.thumbnail_cache.keys() if key[0] == self.current_image_path]
+            for key in keys_to_remove:
+                del media_importer.thumbnail_cache[key]
+            
+            # Обновляем список миниатюр
+            media_importer.refresh_list()
+            
+            logger.info(f"ImageViewer: Обновлены миниатюры в MediaImporter для {self.current_image_path}")
+
+    def get_main_window(self):
+        """Получает ссылку на главное окно приложения"""
+        parent = self.parent()
+        while parent is not None:
+            # Проверяем, имеет ли родитель атрибуты, характерные для главного окна
+            if hasattr(parent, 'image_viewer') and hasattr(parent, 'media_importer'):
+                return parent
+            parent = parent.parent()
+        return None

@@ -80,6 +80,10 @@ class AnnotationManager:
         loaded_items = []
         
         for i, data in enumerate(normalized_annotations):
+            # Игнорируем пустые валидные аннотации при загрузке - они только для статуса
+            if data.get('type') == 'empty':
+                continue
+                
             if data['type'] == 'rect':
                 coords = data['coords']
                 norm_rect = QRectF(coords['x'], coords['y'], coords['width'], coords['height'])
@@ -218,18 +222,39 @@ class AnnotationManager:
         - Нет аннотаций: "none"
         - Есть аннотации без класса (None): "incomplete"
         - Все аннотации имеют валидные классы: "complete"
+        - Пустая валидная аннотация: "complete"
         """
+        logger.info(f"AnnotationManager.get_image_annotation_status: Проверяю статус для {image_path}")
+        
         if image_path not in self.annotations_by_image or not self.annotations_by_image[image_path]:
+            logger.info(f"AnnotationManager.get_image_annotation_status: Нет аннотаций для {image_path} -> 'none'")
             return "none"
-            
+        
+        annotations = self.annotations_by_image[image_path]
+        logger.info(f"AnnotationManager.get_image_annotation_status: Найдено {len(annotations)} аннотаций для {image_path}")
+        
+        # Проверяем, есть ли пустая валидная аннотация
+        for annotation in annotations:
+            logger.info(f"  Аннотация: тип={annotation.get('type')}, класс={annotation.get('class')}")
+            if annotation.get('type') == 'empty' and annotation.get('class') and annotation['class'].get('name') == 'empty_valid':
+                logger.info(f"AnnotationManager.get_image_annotation_status: Найдена пустая валидная аннотация для {image_path} -> 'complete'")
+                return "complete"
+        
+        # Проверяем обычные аннотации
         has_none = False
-        for annotation in self.annotations_by_image[image_path]:
+        for annotation in annotations:
+            # Игнорируем пустые аннотации при проверке
+            if annotation.get('type') == 'empty':
+                continue
+                
             if not annotation.get('class') or annotation['class'].get('name') is None:
                 has_none = True
                 
         if has_none:
+            logger.info(f"AnnotationManager.get_image_annotation_status: Есть аннотации без класса для {image_path} -> 'incomplete'")
             return "incomplete"
         else:
+            logger.info(f"AnnotationManager.get_image_annotation_status: Все аннотации имеют классы для {image_path} -> 'complete'")
             return "complete"
 
     def export_to_json(self, output_file):
