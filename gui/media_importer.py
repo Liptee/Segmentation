@@ -135,6 +135,8 @@ class MediaImporterWidget(QWidget):
         self.mode = "image"
         self.imported_items = {"image": [], "video": []}
         self.copied_annotation = None
+        # Кэш для миниатюр (для оптимизации производительности)
+        self.thumbnail_cache = {}
         self.init_ui()
 
     def init_ui(self):
@@ -261,6 +263,53 @@ class MediaImporterWidget(QWidget):
             new_item.compute_hash()
         self.imported_items[media_type].append(new_item)
 
+    def get_cached_thumbnail(self, file_path, annotation_status, dataset_type, media_type):
+        """Получает миниатюру из кэша или генерирует новую"""
+        cache_key = (file_path, annotation_status, dataset_type, media_type)
+        
+        if cache_key in self.thumbnail_cache:
+            return self.thumbnail_cache[cache_key]
+        
+        # Генерируем новую миниатюру
+        if media_type == "image":
+            thumb = generate_image_thumbnail(file_path, annotation_status, dataset_type)
+        else:
+            thumb = generate_video_thumbnail(file_path)
+        
+        # Сохраняем в кэш (ограничиваем размер кэша)
+        if len(self.thumbnail_cache) > 1000:  # Максимум 1000 миниатюр в кэше
+            # Удаляем старые элементы (простой FIFO)
+            oldest_key = next(iter(self.thumbnail_cache))
+            del self.thumbnail_cache[oldest_key]
+        
+        self.thumbnail_cache[cache_key] = thumb
+        return thumb
+    
+    def update_specific_items(self, items):
+        """Обновляет отображение только для конкретных элементов списка"""
+        # Получаем доступ к AnnotationManager для проверки статуса аннотаций
+        annotation_manager = None
+        main_window = self.get_main_window()
+        if main_window and hasattr(main_window, 'image_viewer') and hasattr(main_window.image_viewer, 'annotation_manager'):
+            annotation_manager = main_window.image_viewer.annotation_manager
+        
+        for item in items:
+            media_item = item.data(Qt.UserRole)
+            if media_item and media_item.media_type == "image":
+                # Определяем статус аннотации
+                annotation_status = "none"
+                if annotation_manager:
+                    annotation_status = annotation_manager.get_image_annotation_status(media_item.file_path)
+                
+                # Инвалидируем кэш для этого элемента (так как dataset_type изменился)
+                old_keys_to_remove = [key for key in self.thumbnail_cache.keys() if key[0] == media_item.file_path]
+                for key in old_keys_to_remove:
+                    del self.thumbnail_cache[key]
+                
+                # Генерируем новую миниатюру
+                thumb = self.get_cached_thumbnail(media_item.file_path, annotation_status, media_item.dataset_type, media_item.media_type)
+                item.setIcon(QIcon(thumb))
+    
     def refresh_list(self):
         self.listWidget.clear()
         
@@ -279,9 +328,9 @@ class MediaImporterWidget(QWidget):
                 if annotation_manager:
                     annotation_status = annotation_manager.get_image_annotation_status(item.file_path)
                 
-                thumb = generate_image_thumbnail(item.file_path, annotation_status, item.dataset_type)
+                thumb = self.get_cached_thumbnail(item.file_path, annotation_status, item.dataset_type, item.media_type)
             else:
-                thumb = generate_video_thumbnail(item.file_path)
+                thumb = self.get_cached_thumbnail(item.file_path, "none", "none", item.media_type)
                 
             list_item.setIcon(QIcon(thumb))
             list_item.setText(os.path.basename(item.file_path))
@@ -347,28 +396,35 @@ class MediaImporterWidget(QWidget):
             # Добавляем разделитель
             menu.addSeparator()
             
-            # Добавляем пункт изменения выборки
-            dataset_menu = QMenu("Изменить выборку", self)
-            
-            # Получаем выбранные элементы
+            # Получаем выбранные элементы для оптимизации
             selected_items = self.listWidget.selectedItems()
             if not selected_items:
                 selected_items = [item]
             
-            train_action = QAction("Обучающая (О)", self)
-            train_action.triggered.connect(lambda: self.change_dataset_type(selected_items, "train"))
+            # Фильтруем только изображения
+            image_items = [item for item in selected_items 
+                          if item.data(Qt.UserRole) and item.data(Qt.UserRole).media_type == "image"]
+            
+            count = len(image_items)
+            count_text = f" ({count})" if count > 1 else ""
+            
+            # Добавляем пункт изменения выборки
+            dataset_menu = QMenu(f"Изменить выборку{count_text}", self)
+            
+            train_action = QAction(f"Обучающая (О){count_text}", self)
+            train_action.triggered.connect(lambda: self.change_dataset_type(image_items, "train"))
             dataset_menu.addAction(train_action)
             
-            val_action = QAction("Валидационная (В)", self)
-            val_action.triggered.connect(lambda: self.change_dataset_type(selected_items, "val"))
+            val_action = QAction(f"Валидационная (В){count_text}", self)
+            val_action.triggered.connect(lambda: self.change_dataset_type(image_items, "val"))
             dataset_menu.addAction(val_action)
             
-            test_action = QAction("Тестовая (Т)", self)
-            test_action.triggered.connect(lambda: self.change_dataset_type(selected_items, "test"))
+            test_action = QAction(f"Тестовая (Т){count_text}", self)
+            test_action.triggered.connect(lambda: self.change_dataset_type(image_items, "test"))
             dataset_menu.addAction(test_action)
             
-            none_action = QAction("Нет выборки (Н)", self)
-            none_action.triggered.connect(lambda: self.change_dataset_type(selected_items, "none"))
+            none_action = QAction(f"Нет выборки (Н){count_text}", self)
+            none_action.triggered.connect(lambda: self.change_dataset_type(image_items, "none"))
             dataset_menu.addAction(none_action)
             
             menu.addMenu(dataset_menu)
@@ -504,13 +560,34 @@ class MediaImporterWidget(QWidget):
 
     def change_dataset_type(self, items, dataset_type):
         """Изменяет тип выборки для выбранных элементов"""
-        for item in items:
-            media_item = item.data(Qt.UserRole)
-            if media_item and media_item.media_type == "image":
-                media_item.dataset_type = dataset_type
+        if not items:
+            return
+            
+        changed_items = []
         
-        # Обновляем отображение
-        self.refresh_list()
+        # Блокируем обновления UI во время пакетной операции
+        self.listWidget.setUpdatesEnabled(False)
+        
+        try:
+            for item in items:
+                media_item = item.data(Qt.UserRole)
+                if media_item and media_item.media_type == "image":
+                    # Проверяем, действительно ли изменяется тип
+                    if media_item.dataset_type != dataset_type:
+                        media_item.dataset_type = dataset_type
+                        changed_items.append(item)
+            
+            # Обновляем только измененные элементы
+            if changed_items:
+                self.update_specific_items(changed_items)
+                
+        finally:
+            # Восстанавливаем обновления UI
+            self.listWidget.setUpdatesEnabled(True)
+
+    def clear_thumbnail_cache(self):
+        """Очищает кэш миниатюр"""
+        self.thumbnail_cache.clear()
 
 if __name__ == "__main__":
     import sys
