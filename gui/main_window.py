@@ -95,10 +95,18 @@ class MainWindow(QMainWindow):
             
         # Установка начального режима
         self.on_mode_changed(self.media_importer.mode)
+        
+        # Сохраняем ссылки на виджеты для управления видимостью
+        self.view_widgets = {
+            'media_viewer': self.media_stack,
+            'thumbnails': self.media_importer,
+            'filters': self.media_importer.filters_group if hasattr(self.media_importer, 'filters_group') else None,
+            'class_list': self.class_manager
+        }
     
     def create_menu_bar(self):
         """
-        Создает меню бар с пунктами 'Экспорт аннотаций' и 'Импорт аннотаций'
+        Создает меню бар с пунктами 'Экспорт аннотаций', 'Импорт аннотаций' и 'Вид'
         """
         menu_bar = QMenuBar(self)
         self.setMenuBar(menu_bar)
@@ -118,6 +126,63 @@ class MainWindow(QMainWindow):
         # Подключаем сигналы
         export_action.triggered.connect(self.open_export_dialog)
         import_action.triggered.connect(self.open_import_dialog)
+        
+        # Создаем меню "Вид"
+        view_menu = QMenu("Вид", self)
+        menu_bar.addMenu(view_menu)
+        
+        # Создаем действия для управления видимостью элементов
+        self.view_actions = {}
+        
+        # Просмотр медиа
+        media_viewer_action = QAction("Просмотр медиа", self)
+        media_viewer_action.setCheckable(True)
+        media_viewer_action.setChecked(True)
+        media_viewer_action.triggered.connect(lambda: self.toggle_widget_visibility('media_viewer'))
+        view_menu.addAction(media_viewer_action)
+        self.view_actions['media_viewer'] = media_viewer_action
+        
+        # Миниатюры
+        thumbnails_action = QAction("Миниатюры", self)
+        thumbnails_action.setCheckable(True)
+        thumbnails_action.setChecked(True)
+        thumbnails_action.triggered.connect(lambda: self.toggle_widget_visibility('thumbnails'))
+        view_menu.addAction(thumbnails_action)
+        self.view_actions['thumbnails'] = thumbnails_action
+        
+        # Фильтры
+        filters_action = QAction("Фильтры", self)
+        filters_action.setCheckable(True)
+        filters_action.setChecked(True)
+        filters_action.triggered.connect(lambda: self.toggle_widget_visibility('filters'))
+        view_menu.addAction(filters_action)
+        self.view_actions['filters'] = filters_action
+        
+        # Список классов
+        class_list_action = QAction("Список классов", self)
+        class_list_action.setCheckable(True)
+        class_list_action.setChecked(True)
+        class_list_action.triggered.connect(lambda: self.toggle_widget_visibility('class_list'))
+        view_menu.addAction(class_list_action)
+        self.view_actions['class_list'] = class_list_action
+    
+    def toggle_widget_visibility(self, widget_name):
+        """
+        Переключает видимость виджета
+        """
+        if widget_name in self.view_widgets:
+            widget = self.view_widgets[widget_name]
+            if widget is not None:
+                widget.setVisible(self.view_actions[widget_name].isChecked())
+                
+                # Если скрываем/показываем media_importer, нужно обновить размеры разделителя
+                if widget_name == 'thumbnails' and hasattr(self, 'media_importer'):
+                    left_splitter = self.findChild(QSplitter, '', Qt.FindChildrenRecursively)
+                    if left_splitter:
+                        if widget.isVisible():
+                            left_splitter.setSizes([500, 300])  # Восстанавливаем стандартные размеры
+                        else:
+                            left_splitter.setSizes([800, 0])  # Растягиваем media_stack на всю высоту
     
     def open_export_dialog(self):
         """
